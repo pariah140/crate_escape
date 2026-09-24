@@ -98,6 +98,47 @@ function makeHarbour(parent: THREE.Object3D, z: number, destination = false): vo
   parent.add(harbour);
 }
 
+function makeFish(color: string): THREE.Group {
+  const fish = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.IcosahedronGeometry(0.48, 0), mat(color));
+  body.scale.set(0.72, 0.4, 1.2); body.position.y = 0.18; fish.add(body);
+  const tail = cone(fish, color, 0, 0.18, -0.67, 0.3, 0.48, 3); tail.rotation.x = -Math.PI / 2;
+  cone(fish, '#f8df98', 0, 0.47, 0.03, 0.15, 0.32, 3);
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.045, 5, 4), mat('#183f4e'));
+    eye.position.set(side * 0.28, 0.27, 0.31); fish.add(eye);
+  }
+  return fish;
+}
+
+function makeTurtle(): THREE.Group {
+  const turtle = new THREE.Group();
+  const shell = new THREE.Mesh(new THREE.IcosahedronGeometry(0.88, 0), mat('#68b879'));
+  shell.scale.set(0.9, 0.48, 1.15); shell.position.y = 0.36; shell.castShadow = true; turtle.add(shell);
+  const top = new THREE.Mesh(new THREE.IcosahedronGeometry(0.56, 0), mat('#3e956f'));
+  top.scale.set(0.88, 0.34, 1.1); top.position.y = 0.69; turtle.add(top);
+  const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.31, 0), mat('#8bd090'));
+  head.position.set(0, 0.29, 0.95); turtle.add(head);
+  for (const side of [-1, 1]) {
+    const flipper = box(turtle, '#7cc987', side * 0.8, 0.14, 0.1, 0.6, 0.14, 0.3);
+    flipper.rotation.y = side * 0.35;
+  }
+  return turtle;
+}
+
+function makeGull(): { group: THREE.Group; wings: THREE.Mesh[] } {
+  const group = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.IcosahedronGeometry(0.18, 0), mat('#fff9e9'));
+  body.scale.set(0.75, 0.42, 1.3); group.add(body);
+  const wings: THREE.Mesh[] = [];
+  for (const side of [-1, 1]) {
+    const wing = box(group, '#fff9e9', side * 0.55, 0, 0, 1.05, 0.09, 0.26);
+    wing.rotation.z = side * 0.18; wings.push(wing);
+  }
+  cone(group, '#f2bd61', 0, -0.04, 0.3, 0.1, 0.27, 3).rotation.x = Math.PI / 2;
+  return { group, wings };
+}
+
 export interface Hazard { x: number; z: number; radius: number; kind: 'rock' | 'buoy'; mesh: THREE.Group; }
 export interface Patrol { x: number; z: number; baseX: number; phase: number; mesh: THREE.Group; light: THREE.Mesh; }
 
@@ -110,8 +151,19 @@ export class World {
   readonly patrols: Patrol[] = [];
   private readonly route = new THREE.Group();
   private readonly ocean: THREE.Mesh;
+  private readonly raycaster = new THREE.Raycaster();
+  private readonly waterPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  private readonly targetMarker = new THREE.Group();
+  private readonly shadowBlob: THREE.Mesh;
+  private readonly impactRing: THREE.Mesh;
+  private readonly splashDrops: Array<{ mesh: THREE.Mesh; vx: number; vy: number; vz: number }> = [];
   private readonly wakes: THREE.Mesh[] = [];
   private readonly waterMarks: THREE.Group[] = [];
+  private readonly fishSchools: Array<{ group: THREE.Group; baseX: number; baseZ: number; phase: number }> = [];
+  private readonly turtles: Array<{ group: THREE.Group; baseX: number; baseZ: number; phase: number }> = [];
+  private readonly gulls: Array<{ group: THREE.Group; wings: THREE.Mesh[]; baseX: number; baseZ: number; phase: number }> = [];
+  private heading = 0;
+  private damageTime = 0;
   private elapsed = 0;
   private width = 1;
   private height = 1;
@@ -125,16 +177,54 @@ export class World {
     this.renderer.setClearColor(palette.water);
     container.appendChild(this.renderer.domElement);
     this.scene.background = new THREE.Color(palette.water);
-    this.scene.fog = new THREE.Fog(palette.water, 55, 120);
+    this.scene.fog = new THREE.Fog(palette.water, 75, 150);
     this.scene.add(new THREE.HemisphereLight('#e0faff', '#478695', 2.6));
     const sun = new THREE.DirectionalLight('#fff4d6', 2.8);
     sun.position.set(-10, 22, -16); sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024); sun.shadow.camera.left = -28; sun.shadow.camera.right = 28;
     sun.shadow.camera.top = 28; sun.shadow.camera.bottom = -28; sun.shadow.bias = -0.0006;
     this.scene.add(sun); this.scene.add(sun.target);
-    this.ocean = new THREE.Mesh(new THREE.PlaneGeometry(130, 1150), mat(palette.water));
-    this.ocean.rotation.x = -Math.PI / 2; this.ocean.position.set(0, -0.04, 260); this.ocean.receiveShadow = true; this.scene.add(this.ocean);
+    const water = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 }, uDeep: { value: new THREE.Color('#087f94') },
+        uLight: { value: new THREE.Color('#2ba9b1') }, uFoam: { value: new THREE.Color('#a1e6dc') },
+      },
+      vertexShader: `uniform float uTime; varying vec3 vWater;
+        void main() {
+          vec3 p = position;
+          p.z = sin(p.x * 0.42 + uTime * 1.1) * 0.08 + sin(p.y * 0.25 - uTime * 0.85) * 0.06;
+          vWater = (modelMatrix * vec4(position, 1.0)).xyz;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+        }`,
+      fragmentShader: `uniform float uTime; uniform vec3 uDeep; uniform vec3 uLight; uniform vec3 uFoam; varying vec3 vWater;
+        void main() {
+          float broad = sin(vWater.x * 0.53 + vWater.z * 0.19 - uTime * 0.9);
+          float cross = sin(vWater.z * 0.42 - vWater.x * 0.24 + uTime * 1.05);
+          float chop = sin(vWater.z * 1.35 + vWater.x * 0.66 - uTime * 1.9);
+          float shade = clamp(0.48 + broad * 0.16 + cross * 0.11 + chop * 0.035, 0.0, 1.0);
+          float glint = smoothstep(0.79, 0.98, 0.5 + broad * 0.23 + cross * 0.24);
+          vec3 color = mix(uDeep, uLight, shade) + uFoam * glint * 0.055;
+          gl_FragColor = vec4(color, 1.0);
+          #include <colorspace_fragment>
+        }`,
+    });
+    this.ocean = new THREE.Mesh(new THREE.PlaneGeometry(130, 1150, 30, 170), water);
+    this.ocean.rotation.x = -Math.PI / 2; this.ocean.position.set(0, -0.04, 260); this.scene.add(this.ocean);
     this.scene.add(this.route); this.scene.add(this.boat);
+    this.shadowBlob = new THREE.Mesh(new THREE.CircleGeometry(2.05, 16), new THREE.MeshBasicMaterial({ color: '#075466', transparent: true, opacity: 0.3, depthWrite: false }));
+    this.shadowBlob.rotation.x = -Math.PI / 2; this.shadowBlob.position.y = 0.015; this.scene.add(this.shadowBlob);
+    const markerRing = new THREE.Mesh(new THREE.RingGeometry(0.47, 0.62, 18), new THREE.MeshBasicMaterial({ color: '#ffe27d', side: THREE.DoubleSide, transparent: true, opacity: 0.9, depthWrite: false }));
+    markerRing.rotation.x = -Math.PI / 2; markerRing.position.y = 0.08; this.targetMarker.add(markerRing);
+    const markerDot = new THREE.Mesh(new THREE.CircleGeometry(0.12, 10), new THREE.MeshBasicMaterial({ color: '#fff5da', side: THREE.DoubleSide }));
+    markerDot.rotation.x = -Math.PI / 2; markerDot.position.y = 0.09; this.targetMarker.add(markerDot);
+    this.targetMarker.visible = false; this.scene.add(this.targetMarker);
+    this.impactRing = new THREE.Mesh(new THREE.RingGeometry(0.8, 0.98, 20), new THREE.MeshBasicMaterial({ color: '#fff4d5', side: THREE.DoubleSide, transparent: true, opacity: 0, depthWrite: false }));
+    this.impactRing.rotation.x = -Math.PI / 2; this.impactRing.visible = false; this.scene.add(this.impactRing);
+    for (let i = 0; i < 10; i++) {
+      const drop = new THREE.Mesh(new THREE.IcosahedronGeometry(0.13 + (i % 3) * 0.035, 0), new THREE.MeshBasicMaterial({ color: i % 3 ? '#a5e9df' : '#fff4db', transparent: true, opacity: 0 }));
+      drop.visible = false; this.scene.add(drop);
+      this.splashDrops.push({ mesh: drop, vx: Math.cos(i * Math.PI / 5) * (2.6 + (i % 3)), vy: 2.7 + (i % 4) * 0.6, vz: Math.sin(i * Math.PI / 5) * (2.6 + (i % 3)) });
+    }
     for (let i = 0; i < 8; i++) {
       const wake = new THREE.Mesh(new THREE.TorusGeometry(0.48 + i * 0.08, 0.045, 3, 9, Math.PI), new THREE.MeshBasicMaterial({ color: '#b6ede3', transparent: true, opacity: 0.55 - i * 0.04 }));
       wake.rotation.x = -Math.PI / 2; wake.rotation.z = Math.PI; this.scene.add(wake); this.wakes.push(wake);
@@ -146,6 +236,25 @@ export class World {
   setBoatColor(color: string): void {
     const hull = this.boat.children[0] as THREE.Mesh;
     (hull.material as THREE.MeshStandardMaterial).color.set(color);
+  }
+
+  screenToWater(clientX: number, clientY: number): { x: number; z: number } {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const hit = this.raycaster.ray.intersectPlane(this.waterPlane, new THREE.Vector3());
+    return hit ? { x: hit.x, z: hit.z } : { x: this.boat.position.x, z: this.boat.position.z };
+  }
+
+  triggerDamage(): void {
+    this.damageTime = 0.7;
+    this.impactRing.visible = true;
+    this.impactRing.position.set(this.boat.position.x, 0.08, this.boat.position.z);
+    this.splashDrops.forEach((drop, i) => {
+      drop.mesh.visible = true;
+      drop.mesh.position.set(this.boat.position.x, 0.4, this.boat.position.z);
+      drop.vy = 2.7 + (i % 4) * 0.6;
+    });
   }
 
   private buildRoute(): void {
@@ -177,6 +286,26 @@ export class World {
       line.castShadow = false; mark.position.set(((i * 37) % 25) - 12.5, 0, ((i * 73) % 560) - 20);
       this.scene.add(mark); this.waterMarks.push(mark);
     }
+    const colors = ['#ffe288', '#ff9d77', '#a7dcff', '#f5a5b6'];
+    for (let i = 0; i < 10; i++) {
+      const baseZ = 18 + i * 52;
+      const baseX = i % 2 ? -6.3 : 6.2;
+      const school = new THREE.Group();
+      for (let j = 0; j < 4; j++) {
+        const fish = makeFish(colors[(i + j) % colors.length]);
+        fish.position.set((j % 2) * 0.8, 0, Math.floor(j / 2) * 1.15);
+        fish.scale.setScalar(0.8 + (j % 2) * 0.18); school.add(fish);
+      }
+      this.route.add(school); this.fishSchools.push({ group: school, baseX, baseZ, phase: i * 1.47 });
+    }
+    for (let i = 0; i < 6; i++) {
+      const turtle = makeTurtle(); this.route.add(turtle);
+      this.turtles.push({ group: turtle, baseX: i % 2 ? -9 : 9, baseZ: 42 + i * 84, phase: i * 1.9 });
+    }
+    for (let i = 0; i < 8; i++) {
+      const gull = makeGull(); this.route.add(gull.group);
+      this.gulls.push({ ...gull, baseX: i % 2 ? -5 : 5, baseZ: 29 + i * 67, phase: i * 1.62 });
+    }
   }
 
   resize(): void {
@@ -184,18 +313,72 @@ export class World {
     this.width = Math.max(rect.width, 1); this.height = Math.max(rect.height, 1);
     this.renderer.setSize(this.width, this.height, false);
     const aspect = this.width / this.height;
-    const span = this.width < 720 ? 26 : 31;
+    const span = this.width < 720 ? 38 : 43;
     this.camera.left = -span * aspect / 2; this.camera.right = span * aspect / 2;
     this.camera.top = span / 2; this.camera.bottom = -span / 2; this.camera.updateProjectionMatrix();
   }
 
-  update(dt: number, running: boolean, x: number, z: number, heat: number, boatSpeed: number): void {
+  update(dt: number, running: boolean, x: number, z: number, heat: number, boatSpeed: number, vx = 0, vz = 0, target: { x: number; z: number } | null = null): void {
     this.elapsed += dt;
+    (this.ocean.material as THREE.ShaderMaterial).uniforms.uTime.value = this.elapsed;
+    if (running && boatSpeed > 0.3) {
+      const targetHeading = Math.atan2(vx, vz);
+      const difference = Math.atan2(Math.sin(targetHeading - this.heading), Math.cos(targetHeading - this.heading));
+      this.heading += difference * Math.min(1, dt * 3.2);
+    }
     this.boat.position.set(x, Math.sin(this.elapsed * 3.4) * 0.055, z);
-    this.boat.rotation.set(0, -Math.sin(this.elapsed * 1.7) * 0.035, Math.sin(this.elapsed * 2.4) * 0.035);
+    this.boat.rotation.set(0, this.heading, Math.sin(this.elapsed * 2.4) * 0.035 + (this.damageTime > 0 ? Math.sin(this.elapsed * 46) * this.damageTime * 0.17 : 0));
+    this.shadowBlob.position.set(x + 0.25, 0.015, z - 0.2);
+    this.shadowBlob.rotation.z = -this.heading;
+    this.targetMarker.visible = Boolean(running && target);
+    if (target) {
+      this.targetMarker.position.set(target.x, 0, target.z);
+      const pulse = 1 + Math.sin(this.elapsed * 6) * 0.1;
+      this.targetMarker.scale.setScalar(pulse);
+    }
     for (let i = 0; i < this.wakes.length; i++) {
-      const wake = this.wakes[i]; wake.position.set(x + Math.sin(this.elapsed * 2 - i) * 0.07, 0.03, z - 2.9 - i * 0.75);
-      wake.visible = running && boatSpeed > 3;
+      const wake = this.wakes[i];
+      const distance = 2.9 + i * 0.75;
+      wake.position.set(x - Math.sin(this.heading) * distance, 0.03, z - Math.cos(this.heading) * distance);
+      wake.rotation.z = Math.PI - this.heading;
+      wake.visible = running && boatSpeed > 0.8;
+    }
+    this.waterMarks.forEach((mark, i) => {
+      mark.position.z += dt * (0.3 + (i % 4) * 0.15);
+      if (mark.position.z > 540) mark.position.z = -20;
+      mark.position.x += Math.sin(this.elapsed * 0.7 + i) * dt * 0.035;
+    });
+    this.fishSchools.forEach(({ group, baseX, baseZ, phase }) => {
+      group.position.set(baseX + Math.sin(this.elapsed * 0.68 + phase) * 1.75, Math.sin(this.elapsed * 2 + phase) * 0.09, baseZ + Math.cos(this.elapsed * 0.45 + phase) * 3.6);
+      group.rotation.y = Math.sin(this.elapsed * 0.62 + phase) * 0.55;
+    });
+    this.turtles.forEach(({ group, baseX, baseZ, phase }) => {
+      group.position.set(baseX + Math.sin(this.elapsed * 0.35 + phase) * 1.1, Math.sin(this.elapsed * 1.1 + phase) * 0.05, baseZ + Math.cos(this.elapsed * 0.3 + phase) * 2.3);
+      group.rotation.y = Math.sin(this.elapsed * 0.35 + phase) * 0.45;
+    });
+    this.gulls.forEach(({ group, wings, baseX, baseZ, phase }) => {
+      group.position.set(baseX + Math.sin(this.elapsed * 0.42 + phase) * 4.2, 4.8 + Math.sin(this.elapsed * 1.7 + phase) * 0.5, baseZ + Math.cos(this.elapsed * 0.42 + phase) * 5);
+      group.rotation.y = this.elapsed * 0.26 + phase;
+      wings.forEach((wing, index) => { wing.rotation.z = (index ? 1 : -1) * (0.16 + Math.sin(this.elapsed * 7 + phase) * 0.38); });
+    });
+    if (this.damageTime > 0) {
+      this.damageTime = Math.max(0, this.damageTime - dt);
+      const progress = 1 - this.damageTime / 0.7;
+      this.impactRing.scale.setScalar(1 + progress * 2.4);
+      (this.impactRing.material as THREE.MeshBasicMaterial).opacity = (1 - progress) * 0.75;
+      this.splashDrops.forEach(drop => {
+        drop.mesh.position.x += drop.vx * dt;
+        drop.mesh.position.z += drop.vz * dt;
+        drop.mesh.position.y += drop.vy * dt;
+        drop.vy -= 8.5 * dt;
+        (drop.mesh.material as THREE.MeshBasicMaterial).opacity = (1 - progress) * 0.95;
+      });
+      const hull = this.boat.children[0] as THREE.Mesh;
+      (hull.material as THREE.MeshStandardMaterial).emissive.set(progress < 0.6 && Math.floor(progress * 12) % 2 === 0 ? '#b62e23' : '#000000');
+    } else {
+      this.impactRing.visible = false;
+      this.splashDrops.forEach(drop => { drop.mesh.visible = false; });
+      ((this.boat.children[0] as THREE.Mesh).material as THREE.MeshStandardMaterial).emissive.set('#000000');
     }
     this.patrols.forEach((patrol, i) => {
       patrol.x = patrol.baseX + Math.sin(this.elapsed * (0.6 + i * 0.05) + patrol.phase) * 2.2;
@@ -205,11 +388,12 @@ export class World {
       patrol.mesh.position.z = chasing ? Math.max(patrol.z, z + 1.15) : patrol.z + Math.sin(this.elapsed * 0.8 + i) * 2;
       (patrol.light.material as THREE.MeshBasicMaterial).opacity = 0.12 + Math.sin(this.elapsed * 2 + i) * 0.03;
     });
-    const targetZ = running ? z + 7.5 : -7;
-    const targetX = running ? x * 0.34 : 0;
-    const factor = Math.min(1, dt * 3.5);
-    this.camera.position.lerp(new THREE.Vector3(targetX + 11.5, 22, targetZ - 19), factor);
-    this.camera.lookAt(targetX, 0, targetZ + 4.2);
+    const targetZ = running ? z + 10 : -7;
+    const targetX = running ? x * 0.5 : 0;
+    const factor = Math.min(1, dt * 2.5);
+    this.camera.position.lerp(new THREE.Vector3(targetX + 16, 31, targetZ - 28), factor);
+    this.camera.lookAt(targetX, 0, targetZ + 5);
+    if (this.damageTime > 0) this.camera.position.x += Math.sin(this.elapsed * 63) * this.damageTime * 0.08;
     this.renderer.render(this.scene, this.camera);
   }
 }

@@ -2,6 +2,7 @@ import './style.css';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Share } from '@capacitor/share';
 import { World } from './world';
+import { advanceMotion } from './piloting';
 import {
   BOATS, PORTS, SHAPE_NAMES, canFitAll, canPlace, jobById, jobsForPort,
   loadSave, occupiedCells, persist, rotatedCells,
@@ -14,12 +15,16 @@ app.innerHTML = `<div class="game-shell">
   <div class="scene-vignette"></div>
   <header class="topbar"><div class="brand-mark" aria-hidden="true">◈</div><div class="brand"><strong>CRATE <span>ESCAPE</span></strong><small>PACK IT · RUN IT · DON'T GET CAUGHT</small></div><div class="topbar-right"><span id="cash" class="coin-pill"></span><button id="sound" class="icon-button" type="button" aria-label="Toggle sound"></button></div></header>
   <div id="view"></div>
+  <div id="damage-flash" class="damage-flash" aria-hidden="true"></div>
+  <div id="damage-callout" class="damage-callout" role="status" aria-live="polite"></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </div>`;
 
 const sceneHost = document.querySelector<HTMLElement>('#scene')!;
 const view = document.querySelector<HTMLElement>('#view')!;
 const toastEl = document.querySelector<HTMLElement>('#toast')!;
+const damageFlashEl = document.querySelector<HTMLElement>('#damage-flash')!;
+const damageCalloutEl = document.querySelector<HTMLElement>('#damage-callout')!;
 const cashEl = document.querySelector<HTMLElement>('#cash')!;
 const soundEl = document.querySelector<HTMLButtonElement>('#sound')!;
 const world = new World(sceneHost);
@@ -27,9 +32,12 @@ const save = loadSave();
 world.setBoatColor(BOATS[save.boat].color);
 
 interface RunState {
-  x: number; z: number; speed: number; hull: number; maxHull: number; heat: number;
+  x: number; z: number; vx: number; vz: number; speed: number; hull: number; maxHull: number; heat: number;
   contact: number; damageCooldown: number; collisions: number; elapsed: number;
-  steering: number; holding: boolean; pointer: number | null; deadline: number;
+  holding: boolean; pointer: number | null; pointerX: number; pointerY: number;
+  pointerStartX: number; pointerStartY: number; pointerDownAt: number; pointerMoved: boolean;
+  dragOriginX: number; dragOriginZ: number;
+  tapTarget: { x: number; z: number } | null; deadline: number; patrolHeat: number; hotCargo: boolean; ending: boolean;
 }
 
 let phase: Phase = 'board';
@@ -44,12 +52,14 @@ let result: { won: boolean; reason: string; payout: number; base: number; bonus:
 let toastTimer = 0;
 let lastHud = 0;
 let audioContext: AudioContext | null = null;
+const heldKeys = new Set<string>();
 
 const boat = () => BOATS[save.boat];
 const holdWidth = () => boat().width;
 const holdHeight = () => boat().height;
 const money = (value: number) => `$${Math.round(value).toLocaleString()}`;
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
+const heatExplanation = 'More diamonds mean more patrol attention. A 1/5 job is quiet; a 5/5 job starts hotter and patrols spot you sooner. Hot cargo cools down more slowly.';
 
 function beep(frequency: number, length = 0.08, type: OscillatorType = 'sine'): void {
   if (!save.sound) return;
@@ -74,16 +84,22 @@ function updateChrome(): void {
   soundEl.innerHTML = save.sound ? '♪' : '♩'; soundEl.setAttribute('aria-label', save.sound ? 'Mute sound' : 'Turn on sound');
 }
 
-function jobCard(job: Job): string {
+function piecesForJob(job: Job): Piece[] {
+  return job.shapes.map((shape, index) => ({ id: `${job.id}-${index}`, jobId: job.id, shape, rotation: 0, x: null, y: null }));
+}
+
+function jobCard(job: Job, remaining: number): string {
   const accepted = jobs.some(item => item.id === job.id);
   const count = job.shapes.reduce((sum, shape) => sum + rotatedCells(shape, 0).length, 0);
+  const fits = accepted || (count <= remaining && canFitAll([...pieces, ...piecesForJob(job)], holdWidth(), holdHeight()));
+  const noFitReason = count > remaining ? 'Not enough cells' : 'Crate shapes will not fit';
   const heat = '◆'.repeat(job.heat) + '<span class="heat-empty">◇</span>'.repeat(5 - job.heat);
-  return `<article class="job-card" style="--cargo:${job.color}">
+  return `<article class="job-card ${fits ? '' : 'cannot-fit'}" style="--cargo:${job.color}">
     <div class="job-symbol" aria-hidden="true">${job.icon}</div>
     <div class="job-content"><div class="job-top"><span class="eyebrow">${escapeHtml(job.client)}</span><span class="job-pay">${money(job.payout)}</span></div>
       <h3>${escapeHtml(job.cargo)}</h3><p>${escapeHtml(job.note)}</p>
-      <div class="job-meta"><span>${count} hold cells</span><span>${escapeHtml(job.destination)}</span><span aria-label="Heat ${job.heat} of 5">${heat}</span></div>
-    </div><button class="job-add ${accepted ? 'is-added' : ''}" type="button" data-action="${accepted ? 'remove-job' : 'add-job'}" data-id="${job.id}" aria-label="${accepted ? 'Remove' : 'Take'} ${escapeHtml(job.cargo)} job">${accepted ? '✓' : '+'}</button>
+      <div class="job-meta"><span>${count} hold cells</span><span>${escapeHtml(job.destination)}</span><span class="heat-rating" aria-label="Patrol heat ${job.heat} out of 5" title="Patrol heat ${job.heat}/5: higher heat makes patrols notice you sooner."><span aria-hidden="true">${heat}</span> HEAT ${job.heat}/5</span>${fits ? '' : `<span class="job-fit-note">${noFitReason}</span>`}</div>
+    </div><button class="job-add ${accepted ? 'is-added' : ''} ${fits ? '' : 'is-unavailable'}" type="button" data-action="${accepted ? 'remove-job' : 'add-job'}" data-id="${job.id}" aria-label="${fits ? `${accepted ? 'Remove' : 'Take'} ${escapeHtml(job.cargo)} job` : `${noFitReason} for ${escapeHtml(job.cargo)}`}" ${fits ? '' : 'disabled'}>${accepted ? '✓' : fits ? '+' : count > remaining ? 'FULL' : 'NO FIT'}</button>
   </article>`;
 }
 
@@ -92,18 +108,28 @@ function headerStep(step: string, title: string, subtitle: string): string {
 }
 
 function renderBoard(): void {
+  const previousScroll = view.querySelector<HTMLElement>('.board-panel')?.scrollTop ?? 0;
   const portJobs = jobsForPort(save.port);
   const selectedPayout = jobs.reduce((sum, job) => sum + job.payout, 0);
+  const totalCells = holdWidth() * holdHeight();
+  const usedCells = pieces.reduce((sum, piece) => sum + rotatedCells(piece.shape, 0).length, 0);
+  const remainingCells = totalCells - usedCells;
   view.innerHTML = `<main class="side-panel board-panel" aria-label="Job board">
     ${headerStep('01 / PICK A DELIVERY', 'The job board', `A little cargo. A little chaos. Sailing from ${PORTS[save.port]}.`)}
     <div class="port-strip"><div class="port-illustration" aria-hidden="true">⚓</div><div><span class="eyebrow">CURRENT PORT</span><strong>${PORTS[save.port]}</strong></div><span class="port-weather">☀ FAIR SEAS</span></div>
-    <div class="section-heading"><span>AVAILABLE JOBS</span><span>${portJobs.length} TO PICK FROM</span></div>
-    <div class="job-list">${portJobs.map(jobCard).join('')}</div>
+    <div class="capacity-strip" aria-label="Cargo hold capacity">
+      <div class="capacity-main"><div><span class="eyebrow">${boat().name.toUpperCase()} · ${holdWidth()} × ${holdHeight()} HOLD</span><strong>${usedCells} / ${totalCells} cells booked</strong></div><span class="capacity-left">${remainingCells} left</span></div>
+      <div class="capacity-meter" role="progressbar" aria-label="Cargo hold cells booked" aria-valuemin="0" aria-valuemax="${totalCells}" aria-valuenow="${usedCells}"><span style="width:${usedCells / totalCells * 100}%"></span></div>
+      <p>Jobs use different amounts of space. Crate shapes must fit too.</p>
+    </div>
+    <div class="section-heading"><span>AVAILABLE JOBS · ${portJobs.length} TO PICK FROM</span><details class="heat-guide"><summary aria-label="Patrol heat: more diamonds mean more patrol attention. Show details." title="${heatExplanation}">HEAT? <span aria-hidden="true">ⓘ</span></summary><p>${heatExplanation}</p></details></div>
+    <div class="job-list">${portJobs.map(job => jobCard(job, remainingCells)).join('')}</div>
     <div class="panel-foot"><div class="summary"><span>${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'} aboard</span><strong>${money(selectedPayout)} possible</strong></div>
       <button class="primary-button" type="button" data-action="pack" ${jobs.length ? '' : 'disabled'}>Pack the hold <span>→</span></button>
       <button class="text-button" type="button" data-action="yard">Visit the shipyard <span>↗</span></button>
     </div>
   </main><div class="scene-caption"><span class="caption-badge">WELCOME TO ${PORTS[save.port].toUpperCase()}</span><strong>Small boat. Big plans.</strong><span>Pick a job and make a clean getaway.</span></div>`;
+  view.querySelector<HTMLElement>('.board-panel')!.scrollTop = previousScroll;
 }
 
 function ownerAt(x: number, y: number): Piece | undefined {
@@ -152,8 +178,8 @@ function renderPack(): void {
 function renderRun(): void {
   view.innerHTML = `<main class="run-overlay" aria-label="Boat run">
     <div class="run-top"><div class="run-stat"><span>ROUTE</span><strong id="route-progress">0%</strong><div class="meter"><i id="route-fill"></i></div></div><div class="run-stat"><span>HULL</span><strong id="hull-number">100%</strong><div class="meter"><i id="hull-fill"></i></div></div><div class="run-stat heat-stat"><span>HEAT</span><strong id="heat-number">LOW</strong><div class="meter"><i id="heat-fill"></i></div></div></div>
-    <div class="run-bottom"><div class="run-instruction"><strong>DRAG TO STEER</strong><span>Hold to speed up · release to coast</span></div><div id="run-timer" class="run-timer">00:00</div></div>
-    <div id="steer-zone" class="steer-zone" aria-label="Drag here to steer boat"></div>
+    <div class="run-bottom"><div class="run-instruction"><strong>DRAG TO PILOT</strong><span>Tap a spot or drag · release to coast</span></div><div id="run-timer" class="run-timer">00:00</div></div>
+    <div id="steer-zone" class="steer-zone" aria-label="Tap or drag on the water to pilot the boat"></div>
   </main>`;
   updateHud();
 }
@@ -200,7 +226,7 @@ function render(): void {
 function addJob(id: string): void {
   const job = jobsForPort(save.port).find(item => item.id === id);
   if (!job || jobs.some(item => item.id === id)) return;
-  const nextPieces = [...pieces, ...job.shapes.map((shape, index): Piece => ({ id: `${job.id}-${index}`, jobId: job.id, shape, rotation: 0, x: null, y: null }))];
+  const nextPieces = [...pieces, ...piecesForJob(job)];
   if (!canFitAll(nextPieces, holdWidth(), holdHeight())) { notify('That cargo will not fit. Move crates or choose a smaller job.', 'danger'); beep(210, 0.13, 'sawtooth'); return; }
   jobs.push(job); pieces = nextPieces; tick(); render(); notify(`${job.cargo} added to the manifest.`, 'success');
 }
@@ -228,8 +254,10 @@ function placeAt(x: number, y: number): void {
 function beginRun(): void {
   if (!pieces.length || pieces.some(piece => piece.x === null)) return;
   const maxHull = boat().hull + save.upgrades.hull * 15;
-  run = { x: 0, z: 0, speed: 5.7, hull: maxHull, maxHull, heat: jobs.reduce((sum, job) => sum + (job.kind === 'hot' ? 7 : 0), 0), contact: 0, damageCooldown: 0, collisions: 0, elapsed: 0, steering: 0, holding: false, pointer: null, deadline: jobs.some(job => job.kind === 'perishable') ? 70 : Infinity };
-  phase = 'run'; render(); beep(400, 0.15, 'triangle'); notify('Cargo aboard. Follow the open water!', 'success');
+  const patrolHeat = jobs.reduce((sum, job) => sum + job.heat, 0);
+  const hotCargo = jobs.some(job => job.kind === 'hot');
+  run = { x: 0, z: 0, vx: 0, vz: 0, speed: 0, hull: maxHull, maxHull, heat: Math.min(65, patrolHeat * 4 + (hotCargo ? 8 : 0)), contact: 0, damageCooldown: 0, collisions: 0, elapsed: 0, holding: false, pointer: null, pointerX: 0, pointerY: 0, pointerStartX: 0, pointerStartY: 0, pointerDownAt: 0, pointerMoved: false, dragOriginX: 0, dragOriginZ: 0, tapTarget: null, deadline: jobs.some(job => job.kind === 'perishable') ? 70 : Infinity, patrolHeat, hotCargo, ending: false };
+  heldKeys.clear(); phase = 'run'; render(); beep(400, 0.15, 'triangle'); notify('Cargo aboard. Tap the water or drag to pilot!', 'success');
 }
 
 function updateHud(): void {
@@ -264,33 +292,74 @@ function endRun(won: boolean, reason: string): void {
   if (won) window.setTimeout(() => beep(880, 0.22, 'triangle'), 110);
 }
 
+function showImpact(label: string): void {
+  world.triggerDamage();
+  damageCalloutEl.textContent = label;
+  damageFlashEl.classList.remove('active'); damageCalloutEl.classList.remove('active');
+  void damageFlashEl.offsetWidth;
+  damageFlashEl.classList.add('active'); damageCalloutEl.classList.add('active');
+}
+
+function steeringPoint(clientX: number, clientY: number): { x: number; z: number } {
+  const point = world.screenToWater(clientX, clientY);
+  return { x: Math.max(-6.8, Math.min(6.8, point.x)), z: Math.max(0, Math.min(520, point.z)) };
+}
+
+function dragPoint(): { x: number; z: number } | null {
+  if (!run?.holding || !run.pointerMoved) return null;
+  const start = world.screenToWater(run.pointerStartX, run.pointerStartY);
+  const current = world.screenToWater(run.pointerX, run.pointerY);
+  return {
+    x: Math.max(-6.8, Math.min(6.8, run.dragOriginX + current.x - start.x)),
+    z: Math.max(0, Math.min(520, run.dragOriginZ + current.z - start.z)),
+  };
+}
+
 function updateRun(dt: number): void {
   if (!run || phase !== 'run') return;
+  if (run.ending) return;
   run.elapsed += dt; run.damageCooldown = Math.max(0, run.damageCooldown - dt);
-  const maxSpeed = (run.holding ? 9.8 : 6.1) * (boat().speed + save.upgrades.engine * 0.09);
-  run.speed += (maxSpeed - run.speed) * Math.min(1, dt * (run.holding ? 1.5 : 0.75));
-  run.x += Math.max(-1, Math.min(1, run.steering - run.x)) * Math.min(1, dt * (run.holding ? 4.2 : 2.1));
-  run.x = Math.max(-6.8, Math.min(6.8, run.x)); run.z += run.speed * dt;
-  const hotCargo = jobs.some(job => job.kind === 'hot');
+  const maxSpeed = 9.2 * (boat().speed + save.upgrades.engine * 0.09);
+  let target: { x: number; z: number } | null = null;
+  if (run.holding && run.pointer !== null) target = dragPoint();
+  else if (!heldKeys.size && run.tapTarget) target = run.tapTarget;
+  if (target) {
+    if (Math.hypot(target.x - run.x, target.z - run.z) < 0.65 && !run.holding) {
+      run.tapTarget = null; target = null;
+    }
+  }
+  const dx = Number(heldKeys.has('arrowright') || heldKeys.has('d')) - Number(heldKeys.has('arrowleft') || heldKeys.has('a'));
+  const dz = Number(heldKeys.has('arrowup') || heldKeys.has('w')) - Number(heldKeys.has('arrowdown') || heldKeys.has('s'));
+  const motion = advanceMotion(run, target, { x: dx, z: dz }, maxSpeed, dt);
+  run.x = motion.x; run.z = motion.z; run.vx = motion.vx; run.vz = motion.vz;
+  run.speed = Math.hypot(run.vx, run.vz);
   let spotted = false;
   let contact = false;
   for (const patrol of world.patrols) {
     const dz = run.z - patrol.mesh.position.z;
     const dx = Math.abs(run.x - patrol.x);
-    if (dz > -12 && dz < -2 && dx < 3.1 + (hotCargo ? 0.8 : 0)) spotted = true;
+    if (dz > -12 && dz < -2 && dx < 3.1 + Math.min(run.patrolHeat * 0.15, 1.8) + (run.hotCargo ? 0.6 : 0)) spotted = true;
     if (Math.abs(dz) < 1.8 && dx < 1.8) contact = true;
   }
   run.contact = contact ? run.contact + dt : Math.max(0, run.contact - dt * 1.5);
-  run.heat = Math.max(hotCargo ? 12 : 0, Math.min(100, run.heat + (spotted ? 37 : hotCargo ? -2 : -8) * dt));
+  run.heat = Math.max(run.hotCargo ? 12 : 0, Math.min(100, run.heat + (spotted ? 37 : run.hotCargo ? -2 : -8) * dt));
   if (spotted && run.heat > 50 && Math.floor(run.elapsed * 2) % 5 === 0) beep(340, 0.08, 'square');
-  if (run.contact >= 2) { endRun(false, 'caught'); return; }
+  if (run.contact >= 2) { run.ending = true; showImpact('CAUGHT!'); window.setTimeout(() => endRun(false, 'caught'), 650); return; }
   for (const hazard of world.hazards) {
     if (Math.abs(run.z - hazard.z) < hazard.radius + 0.9 && Math.abs(run.x - hazard.x) < hazard.radius + 0.9 && run.damageCooldown === 0) {
-      run.hull = Math.max(0, run.hull - (hazard.kind === 'rock' ? 24 : 12));
-      run.collisions++; run.speed *= 0.6; run.damageCooldown = 1.25;
+      const damage = hazard.kind === 'rock' ? 24 : 12;
+      run.hull = Math.max(0, run.hull - damage);
+      run.collisions++; run.damageCooldown = 1.25;
+      const awayX = run.x - hazard.x, awayZ = run.z - hazard.z;
+      const awayLength = Math.hypot(awayX, awayZ) || 1;
+      run.vx = awayX / awayLength * 2.8; run.vz = awayZ / awayLength * 2.8;
+      run.speed = Math.hypot(run.vx, run.vz);
+      run.tapTarget = null;
+      showImpact(`−${damage} HULL`);
       beep(135, 0.22, 'sawtooth'); Haptics.impact({ style: ImpactStyle.Heavy }).catch(() => undefined);
       notify(hazard.kind === 'rock' ? 'Rock! Steer into open water.' : 'Buoy bump! Watch the channel.', 'danger');
-      if (run.hull <= 0) { endRun(false, 'sunk'); return; }
+      updateHud();
+      if (run.hull <= 0) { run.ending = true; window.setTimeout(() => endRun(false, 'sunk'), 650); return; }
     }
   }
   if (run.z >= 520) { endRun(true, 'delivered'); return; }
@@ -336,19 +405,21 @@ view.addEventListener('pointerdown', event => {
   const target = (event.target as HTMLElement).closest<HTMLElement>('[data-action="select-piece"]');
   if (phase === 'pack' && target) { dragPiece = target.dataset.id!; dragMoved = false; }
   if (phase === 'run' && (event.target as HTMLElement).closest('.steer-zone') && run) {
-    run.pointer = event.pointerId; run.holding = true; sceneHost.classList.add('steering');
-    steerFromPointer(event.clientX);
+    run.pointer = event.pointerId; run.holding = true; run.tapTarget = null;
+    run.pointerX = event.clientX; run.pointerY = event.clientY;
+    run.pointerStartX = event.clientX; run.pointerStartY = event.clientY;
+    run.pointerDownAt = performance.now(); run.pointerMoved = false;
+    run.dragOriginX = run.x; run.dragOriginZ = run.z;
+    sceneHost.classList.add('steering');
   }
 });
 
-function steerFromPointer(clientX: number): void {
-  if (!run) return;
-  const rect = sceneHost.getBoundingClientRect();
-  run.steering = Math.max(-6.7, Math.min(6.7, ((clientX - rect.left) / rect.width - 0.5) * 16));
-}
-
 window.addEventListener('pointermove', event => {
-  if (phase === 'run' && run?.pointer === event.pointerId) { steerFromPointer(event.clientX); return; }
+  if (phase === 'run' && run?.pointer === event.pointerId) {
+    run.pointerX = event.clientX; run.pointerY = event.clientY;
+    if (Math.hypot(event.clientX - run.pointerStartX, event.clientY - run.pointerStartY) > 9) run.pointerMoved = true;
+    return;
+  }
   if (phase !== 'pack') return;
   const el = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('.hold-cell');
   if (dragPiece) { dragMoved = true; if (selected !== dragPiece) selected = dragPiece; }
@@ -357,7 +428,11 @@ window.addEventListener('pointermove', event => {
 });
 
 window.addEventListener('pointerup', event => {
-  if (phase === 'run' && run?.pointer === event.pointerId) { run.holding = false; run.pointer = null; sceneHost.classList.remove('steering'); return; }
+  if (phase === 'run' && run?.pointer === event.pointerId) {
+    const tapped = !run.pointerMoved && performance.now() - run.pointerDownAt < 320;
+    run.tapTarget = tapped ? steeringPoint(event.clientX, event.clientY) : null;
+    run.holding = false; run.pointer = null; sceneHost.classList.remove('steering'); return;
+  }
   if (phase === 'pack' && dragPiece) {
     const cell = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('.hold-cell');
     if (cell && dragMoved) { selected = dragPiece; placeAt(Number(cell.dataset.x), Number(cell.dataset.y)); }
@@ -365,20 +440,25 @@ window.addEventListener('pointerup', event => {
   }
 });
 
+window.addEventListener('pointercancel', event => {
+  if (phase === 'run' && run?.pointer === event.pointerId) {
+    run.holding = false; run.pointer = null; sceneHost.classList.remove('steering');
+  }
+});
+
 window.addEventListener('keydown', event => {
   if (phase === 'pack' && (event.key === 'r' || event.key === 'R')) { event.preventDefault(); handleAction('rotate'); }
   if (phase === 'run' && run) {
-    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'a', 'd', 'w', 'A', 'D', 'W'].includes(event.key)) event.preventDefault();
-    if (event.key === 'ArrowLeft' || event.key.toLowerCase() === 'a') { run.steering = -6.7; run.holding = true; }
-    if (event.key === 'ArrowRight' || event.key.toLowerCase() === 'd') { run.steering = 6.7; run.holding = true; }
-    if (event.key === 'ArrowUp' || event.key.toLowerCase() === 'w') run.holding = true;
+    const key = event.key.toLowerCase();
+    if (['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'a', 'd', 'w', 's'].includes(key)) {
+      event.preventDefault(); heldKeys.add(key); run.tapTarget = null;
+    }
   }
 });
 window.addEventListener('keyup', event => {
-  if (phase === 'run' && run && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'a', 'd', 'w', 'A', 'D', 'W'].includes(event.key)) {
-    run.holding = false; run.steering = run.x;
-  }
+  heldKeys.delete(event.key.toLowerCase());
 });
+window.addEventListener('blur', () => { heldKeys.clear(); if (run) { run.holding = false; run.pointer = null; } sceneHost.classList.remove('steering'); });
 
 soundEl.addEventListener('click', () => { save.sound = !save.sound; saveProgress(); if (save.sound) beep(620); });
 
@@ -386,7 +466,8 @@ let previous = performance.now();
 function frame(now: number): void {
   const dt = Math.min((now - previous) / 1000, 0.05); previous = now;
   if (phase === 'run') updateRun(dt);
-  world.update(dt, phase === 'run', run?.x || 0, run?.z || 0, run?.heat || 0, run?.speed || 0);
+  const target = run?.holding && run.pointer !== null ? dragPoint() : run?.tapTarget || null;
+  world.update(dt, phase === 'run', run?.x || 0, run?.z || 0, run?.heat || 0, run?.speed || 0, run?.vx || 0, run?.vz || 0, target);
   requestAnimationFrame(frame);
 }
 
