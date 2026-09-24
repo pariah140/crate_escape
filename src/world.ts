@@ -95,6 +95,13 @@ function makeBoat(color: string, style: BoatStyle | 'patrol' = 'dinghy'): THREE.
   } else if (style === 'barge') {
     for (const side of [-1, 1]) for (let i = 0; i < 3; i++) box(craft, ['#91bea7', '#e8b785', '#a5a8d1'][i], side * .83, 2.06, -.2 + i * .92, 1.37, .55, .79);
     box(craft, '#6b895d', 0, 2.79, cabinZ, 2.44, .14, 1.58);
+  } else if (style === 'sailboat') {
+    cylinder(craft, '#986d4f', 0, 3.15, .18, .075, 3.1);
+    const mainsail = cone(craft, '#fff4cd', .47, 3.56, .1, 1.02, 2.35, 3);
+    mainsail.rotation.z = -.32;
+    const foresail = cone(craft, '#f3d79d', -.45, 2.92, 1.22, .5, 1.2, 3);
+    foresail.rotation.z = .3;
+    box(craft, '#f0bb79', 0, 1.74, 1.52, .75, .1, .86);
   } else {
     cylinder(craft, '#f5f3d9', 0, 1.8, 1.38, .15, .22);
     cone(craft, '#ffce5c', 0, 2.1, 1.38, .25, .35, 5);
@@ -288,9 +295,14 @@ export class World {
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.OrthographicCamera(-12, 12, 19, -19, 0.1, 200);
   boat = makeBoat(palette.coral);
+  private boatLamp: THREE.SpotLight | null = null;
+  private boatLampBulb: THREE.Mesh | null = null;
   private readonly yard = new THREE.Group();
   private inYard = false;
   private yardCount = 0;
+  private yardFocused: number | null = null;
+  private readonly yardBerths = new Map<number, THREE.Vector3>();
+  private readonly yardBoats = new Map<number, THREE.Group>();
   readonly hazards: Hazard[] = [];
   readonly patrols: Patrol[] = [];
   private readonly route = new THREE.Group();
@@ -440,13 +452,32 @@ export class World {
   setBoat(craft: BoatDefinition): void {
     this.scene.remove(this.boat);
     this.boat = makeBoat(craft.color, craft.style);
+    const lamp = new THREE.SpotLight('#ffe5a6', 25, 32, .55, .68, 1.3);
+    lamp.position.set(0, 2.9, 1.7);
+    lamp.target.position.set(0, -.55, 12);
+    this.boat.add(lamp, lamp.target);
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(.18, 8, 6), new THREE.MeshBasicMaterial({ color: '#ffe8a8' }));
+    bulb.position.set(0, 2.5, 2.15); this.boat.add(bulb);
+    this.boatLamp = lamp; this.boatLampBulb = bulb;
     this.scene.add(this.boat);
     const size = craft.width >= 9 ? 1.55 : craft.width >= 8 ? 1.42 : craft.width >= 6 ? 1.22 : 1;
     this.boatFoam.scale.set(1.68 * size, 2.55 * size, 1);
+    this.setNightLighting(this.plan.night, false);
+  }
+
+  setNightLighting(night: boolean, lightsOn: boolean): void {
+    if (this.boatLamp) this.boatLamp.visible = night && lightsOn;
+    if (this.boatLampBulb) this.boatLampBulb.visible = night && lightsOn;
+  }
+
+  boatScreenPosition(): { x: number; y: number } {
+    const projected = this.boat.getWorldPosition(new THREE.Vector3()).project(this.camera);
+    return { x: (projected.x + 1) * 50, y: (1 - projected.y) * 50 };
   }
 
   configureLevel(plan: LevelPlan): void {
     this.plan = plan;
+    this.setNightLighting(plan.night, false);
     this.buildRoute();
     const sea: Record<Biome, [string, string]> = {
       cove: ['#087f94', '#2ba9b1'], mist: ['#5b8f9b', '#9dc5c8'], reef: ['#138ca2', '#51c7bb'], lantern: ['#216d86', '#4ba7aa'], star: ['#266b93', '#6bafcc'],
@@ -463,34 +494,80 @@ export class World {
   }
 
   showShipyard(owned: number[], active: number): void {
-    this.inYard = true; this.yardCount = owned.length; this.yard.clear(); this.yard.visible = true; this.route.visible = false;
+    this.yard.traverse(object => {
+      if (!(object instanceof THREE.Mesh)) return;
+      object.geometry.dispose();
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of materials) material.dispose();
+    });
+    this.inYard = true; this.yardCount = owned.length; this.yard.clear(); this.yardBerths.clear(); this.yardBoats.clear(); this.yardFocused = null; this.yard.visible = true; this.route.visible = false;
     this.boat.visible = false; this.boatFoam.visible = false; this.bowWash.visible = false;
-    // A long timber quay with one moored, individual model for every owned craft.
-    box(this.yard, '#886448', 0, .48, -8.8, 68, .95, 5.2);
-    box(this.yard, '#c18b5b', 0, 1.02, -8.8, 68, .16, 5.2);
-    for (let i = 0; i < 17; i++) box(this.yard, '#805c43', -32 + i * 4, 1.13, -8.8, .1, .03, 5.2);
-    for (let i = 0; i < 6; i++) {
-      const x = -31 + i * 12;
-      cylinder(this.yard, '#6e5243', x, .82, -5.7, .21, 1.55);
-      cylinder(this.yard, '#e9d4a0', x, 1.59, -5.7, .23, .1);
+    // Poured concrete apron, marked service bays, workshops, gantry and stored freight.
+    box(this.yard, '#9ca9a9', 0, .35, -16, 72, .7, 13);
+    box(this.yard, '#c7d0c7', 0, .76, -16, 72, .13, 13);
+    box(this.yard, '#6e8990', 0, .72, -9.35, 72, .32, .48);
+    for (let i = -3; i <= 3; i++) {
+      const x = i * 10;
+      box(this.yard, '#e7eadb', x, .84, -12.1, .13, .025, 4.7);
+      cylinder(this.yard, '#3c5c66', x + 4.3, 1.16, -9.1, .3, .85);
+      cylinder(this.yard, '#e9c468', x + 4.3, 1.61, -9.1, .33, .1);
     }
-    box(this.yard, '#f9dda7', -18, 2.25, -13.3, 7.6, 2.9, 3.7);
-    const roof = box(this.yard, '#e37564', -18, 3.93, -13.3, 8.25, .36, 4.2); roof.rotation.z = -.05;
-    box(this.yard, '#95c9bb', -18, 2.1, -11.4, 2.7, 1.45, .12);
-    box(this.yard, '#f5d7a0', 13, 1.25, -10.2, 4.5, .5, 3.2);
+    // Workshop, glazing and loading doors.
+    box(this.yard, '#d8d8c8', -19, 2.95, -23.4, 18, 4.8, 6.6);
+    box(this.yard, '#dc826b', -19, 5.5, -23.4, 19, .55, 7.4);
+    for (let i = 0; i < 3; i++) {
+      box(this.yard, '#4b8190', -25 + i * 6, 2.2, -20.02, 3.7, 2.8, .12);
+      box(this.yard, '#f3d797', -25 + i * 6, 3.74, -19.92, 3.9, .14, .18);
+    }
+    box(this.yard, '#eee2bb', 20, 2.1, -23.7, 10, 3.1, 5.3);
+    box(this.yard, '#83aa99', 20, 3.76, -23.7, 10.6, .36, 5.8);
+    for (let i = 0; i < 4; i++) box(this.yard, '#628ca0', 16.6 + i * 2.2, 2, -20.98, 1.5, 1.35, .1);
+    // Yellow gantry crane and hanging hoist.
+    for (const x of [6, 27]) box(this.yard, '#e9b74f', x, 5.8, -15.2, .62, 9.8, .62);
+    box(this.yard, '#f1c661', 16.5, 10.75, -15.2, 23, .72, .85);
+    box(this.yard, '#dc9851', 18.5, 10.25, -15.2, 1.4, .6, 1.3);
+    cylinder(this.yard, '#454f54', 18.5, 7.6, -15.2, .055, 4.8);
+    box(this.yard, '#596d6d', 18.5, 5.12, -15.2, .55, .45, .55);
+    // Stacked containers, pallets, drums and working lights make the yard feel occupied.
+    for (const [i, x, z, color] of [[0,-31,-15,'#e29a6f'],[1,-30,-23,'#76aeb0'],[2,30,-22,'#d7b37b'],[3,32,-16,'#98b4a2']] as const) {
+      box(this.yard, color, x, 1.7 + (i % 2) * 1.25, z, 3.5, 1.7, 2.1);
+      for (let stripe = -1; stripe <= 1; stripe++) box(this.yard, '#5d777b', x + stripe * .8, 1.7 + (i % 2) * 1.25, z + 1.07, .06, 1.48, .05);
+    }
+    for (const x of [-33, -8, 32]) {
+      for (let i = 0; i < 3; i++) cylinder(this.yard, ['#c97762','#debf78','#77a5a4'][i], x + i * .8, 1.15, -10.8, .28, .72);
+      box(this.yard, '#9a7959', x + 1.7, .98, -11, 1.4, .42, 1.2);
+    }
     for (const [slot, index] of owned.entries()) {
       const def = BOATS[index];
       const row = Math.floor(slot / 5), column = slot % 5;
       const columns = Math.min(owned.length - row * 5, 5);
-      const x = -23 + (column - (columns - 1) / 2) * 7;
-      const z = -4.5 + row * 8;
-      const model = makeBoat(def.color, def.style); model.position.set(x, -.35, z); model.rotation.y = -.15; this.yard.add(model);
+      const x = (column - (columns - 1) / 2) * 11;
+      const z = -4 + row * 11;
+      const model = makeBoat(def.color, def.style); model.position.set(x, -.35, z); model.rotation.y = -.15; model.userData.boatIndex = index; this.yard.add(model);
+      this.yardBoats.set(index, model); this.yardBerths.set(index, new THREE.Vector3(x, 0, z));
       const foam = makeHullFoam(index >= 3 ? 2.4 : 1.8, index >= 3 ? 3.3 : 2.5); foam.position.set(x, .05, z); this.yard.add(foam);
+      // A floating pontoon and repair gantry beside every berth.
+      box(this.yard, '#aebcb7', x + 4, .17, z, 1.15, .4, 7.1);
+      box(this.yard, '#f0cf77', x + 4, .4, z - 2.8, 1.15, .08, .25);
       if (index === active) {
         const ring = new THREE.Mesh(new THREE.RingGeometry(3.25, 3.38, 32), new THREE.MeshBasicMaterial({ color: '#ffe888', side: THREE.DoubleSide, transparent: true, opacity: .75 }));
         ring.rotation.x = -Math.PI / 2; ring.position.set(x, .07, z); this.yard.add(ring);
       }
     }
+  }
+
+  focusShipyardBoat(index: number | null): void { this.yardFocused = index !== null && this.yardBerths.has(index) ? index : null; }
+
+  shipyardBoatAt(clientX: number, clientY: number): number | null {
+    if (!this.inYard) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const pointer = new THREE.Vector2((clientX - rect.left) / rect.width * 2 - 1, -(clientY - rect.top) / rect.height * 2 + 1);
+    this.raycaster.setFromCamera(pointer, this.camera);
+    for (const hit of this.raycaster.intersectObjects([...this.yardBoats.values()], true)) {
+      let object: THREE.Object3D | null = hit.object;
+      while (object) { if (typeof object.userData.boatIndex === 'number') return object.userData.boatIndex; object = object.parent; }
+    }
+    return null;
   }
 
   hideShipyard(): void {
@@ -835,13 +912,15 @@ export class World {
       }
     });
     const narrow = this.width < 720;
-    const targetZ = this.inYard ? -14 : this.docking ? z + (narrow ? 3 : 5) : running ? z + (narrow ? 8 : 14) : -7;
-    const targetX = this.inYard ? 0 : this.docking ? x - 2.8 : running ? x : 0;
+    const focus = this.inYard && this.yardFocused !== null ? this.yardBerths.get(this.yardFocused) : null;
+    const targetZ = this.inYard ? (focus ? focus.z - (narrow ? 6 : 1) : -8) : this.docking ? z + (narrow ? 3 : 5) : running ? z + (narrow ? 8 : 14) : -7;
+    const targetX = this.inYard ? (focus ? focus.x : 0) : this.docking ? x - 2.8 : running ? x : 0;
+    const yardFrameX = focus && !narrow ? 3.5 : 0;
     const factor = Math.min(1, dt * 2.5);
-    this.camera.zoom += ((this.inYard ? (narrow ? .8 : Math.max(.7, 1.08 - (this.yardCount - 1) * .09)) : this.docking ? 1.42 : 1) - this.camera.zoom) * factor;
+    this.camera.zoom += ((this.inYard ? (focus ? (narrow ? 1.65 : 2.45) : narrow ? .58 : Math.max(.58, .82 - (this.yardCount - 2) * .035)) : this.docking ? 1.42 : 1) - this.camera.zoom) * factor;
     this.camera.updateProjectionMatrix();
-    this.camera.position.lerp(new THREE.Vector3(targetX + (narrow ? 6 : 16), 31, targetZ - (narrow ? 25 : 28)), factor);
-    this.camera.lookAt(targetX, 0, targetZ + (narrow ? 2 : 5));
+    this.camera.position.lerp(new THREE.Vector3(targetX + yardFrameX + (narrow ? 6 : 16), 31, targetZ + (this.inYard ? (narrow ? 25 : 28) : -(narrow ? 25 : 28))), factor);
+    this.camera.lookAt(targetX + yardFrameX, 0, targetZ + (this.inYard ? (narrow ? -2 : -5) : (narrow ? 2 : 5)));
     if (this.damageTime > 0) this.camera.position.x += Math.sin(this.elapsed * 63) * this.damageTime * 0.08;
     this.renderer.render(this.scene, this.camera);
   }

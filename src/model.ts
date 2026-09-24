@@ -5,7 +5,7 @@ export type Phase = 'board' | 'pack' | 'run' | 'result' | 'yard' | 'market' | 'm
 export type CargoKind = 'standard' | 'bulky' | 'hot' | 'perishable' | 'fragile' | 'vip';
 export type Cell = readonly [number, number];
 export type Shape = 'single' | 'domino' | 'line3' | 'square' | 'ell' | 'tee' | 'ess';
-export type BoatStyle = 'dinghy' | 'speedboat' | 'trawler' | 'cruiser' | 'freighter' | 'skiff' | 'catamaran' | 'houseboat' | 'clipper' | 'barge';
+export type BoatStyle = 'dinghy' | 'speedboat' | 'trawler' | 'cruiser' | 'freighter' | 'skiff' | 'catamaran' | 'houseboat' | 'clipper' | 'barge' | 'sailboat';
 export interface BoatDefinition {
   name: string; style: BoatStyle; width: number; height: number; blocked: Cell[];
   speed: number; turnRate: number; acceleration: number; coast: number; hull: number;
@@ -65,7 +65,10 @@ export const BOATS: BoatDefinition[] = [
   { name: 'Hearthside Houseboat', style: 'houseboat', width: 7, height: 5, blocked: [[0, 0], [6, 0], [0, 4], [6, 4]], speed: 0.76, turnRate: 1.12, acceleration: 1.05, coast: 0.56, hull: 205, price: 1980, repairRate: 1.7, color: '#f1b779', handling: 'Gentle turns', description: 'A floating cottage with a generous square hold.' },
   { name: 'Bluebell Clipper', style: 'clipper', width: 8, height: 5, blocked: [[0, 0], [7, 0], [0, 4], [7, 4]], speed: 1.3, turnRate: 1.3, acceleration: 1.45, coast: 0.65, hull: 160, price: 2850, repairRate: 2.05, color: '#7cafe0', handling: 'Sweeping turns', description: 'A long, swift hull that needs room to carve.' },
   { name: 'Mossbank Barge', style: 'barge', width: 9, height: 6, blocked: [[0, 0], [8, 0], [0, 5], [8, 5]], speed: 0.68, turnRate: 0.68, acceleration: 0.75, coast: 0.36, hull: 310, price: 4950, repairRate: 2.45, color: '#a5bb7a', handling: 'Very wide turns', description: 'The biggest hold afloat, with a patient helm.' },
+  { name: 'Patchwork Sailboat', style: 'sailboat', width: 4, height: 3, blocked: [[0, 0], [3, 0], [0, 2], [3, 2]], speed: 0.58, turnRate: 2.5, acceleration: 0.8, coast: 0.42, hull: 65, price: 0, repairRate: 0, color: '#75bbcf', handling: 'Slow but free', description: 'Your free lifeline when repairs are out of reach. A tiny hold and a gentle sail.' },
 ];
+export const BACKUP_BOAT_INDEX = BOATS.length - 1;
+export const MIN_SEAWORTHY_CONDITION = 45;
 
 export const usableCells = (boat: BoatDefinition): number => boat.width * boat.height - boat.blocked.length;
 export const isBlocked = (x: number, y: number, blocked: readonly Cell[]): boolean => blocked.some(([bx, by]) => bx === x && by === y);
@@ -141,7 +144,7 @@ const lanternJobs: Job[] = [
   { id: 'masked', client: 'The Masked Merchant', cargo: 'Masked parcels', kind: 'hot', shapes: ['square', 'ess'], payout: 470, heat: 5, destination: 'Shaded Slip', note: 'The market closes at dawn.', color: '#b697d8', icon: '?' },
 ];
 const starfallJobs: Job[] = [
-  { id: 'comets', client: 'The Observatory', cargo: 'Comet lenses', kind: 'fragile', shapes: ['square', 'tee'], payout: 540, heat: 3, destination: 'Sky Pier', note: 'One scratch ruins the view.', color: '#a3d7e8', icon: '✧' },
+  { id: 'comets', client: 'The Observatory', cargo: 'Comet lenses', kind: 'fragile', shapes: ['ell', 'domino'], payout: 540, heat: 3, destination: 'Sky Pier', note: 'One scratch ruins the view.', color: '#a3d7e8', icon: '✧' },
   { id: 'starfruit', client: 'Starlight Orchard', cargo: 'Starfruit baskets', kind: 'perishable', shapes: ['ess', 'ell', 'domino'], payout: 565, heat: 2, destination: 'Orchard Jetty', note: 'Bring the harvest home fresh.', color: '#f2bf70', icon: '✿' },
   { id: 'festivalgrand', client: 'The Grand Regatta', cargo: 'Regatta trophies', kind: 'vip', shapes: ['square', 'square'], payout: 610, heat: 4, destination: 'Champion Dock', note: 'The winner rides in the centre.', color: '#ebd192', icon: '◆' },
   { id: 'meteor', client: 'The Meteor Museum', cargo: 'Meteor fragments', kind: 'bulky', shapes: ['tee', 'ess', 'line3'], payout: 650, heat: 3, destination: 'Crater Quay', note: 'Heavier than they look.', color: '#a6a9cb', icon: '◈' },
@@ -255,7 +258,7 @@ export function canFitAll(pieces: Piece[], width: number, height: number, blocke
 }
 
 export function defaultSave(): SaveData {
-  return { cash: 80, reputation: 0, boat: 0, ownedBoats: [0], port: 0, unlockedPorts: [0], boatUpgrades: { 0: { engine: 0, hull: 0 } }, boatCondition: { 0: 100 }, yardUpgrades: { repairBay: 0, brokerDesk: 0 }, runs: 0, level: 1, soundTutorialSeen: false, sound: true };
+  return { cash: 80, reputation: 0, boat: 0, ownedBoats: [0, BACKUP_BOAT_INDEX], port: 0, unlockedPorts: [0], boatUpgrades: { 0: { engine: 0, hull: 0 }, [BACKUP_BOAT_INDEX]: { engine: 0, hull: 0 } }, boatCondition: { 0: 100, [BACKUP_BOAT_INDEX]: 100 }, yardUpgrades: { repairBay: 0, brokerDesk: 0 }, runs: 0, level: 1, soundTutorialSeen: false, sound: true };
 }
 
 export function loadSave(): SaveData {
@@ -264,13 +267,13 @@ export function loadSave(): SaveData {
     if (!data || typeof data.cash !== 'number') return defaultSave();
     const initial = defaultSave();
     const selected = Number.isInteger(data.boat) && data.boat! >= 0 && data.boat! < BOATS.length ? data.boat! : 0;
-    const owned = [...new Set([0, ...(Array.isArray(data.ownedBoats) ? data.ownedBoats : [selected])])].filter(index => Number.isInteger(index) && index >= 0 && index < BOATS.length);
+    const owned = [...new Set([0, BACKUP_BOAT_INDEX, ...(Array.isArray(data.ownedBoats) ? data.ownedBoats : [selected])])].filter(index => Number.isInteger(index) && index >= 0 && index < BOATS.length).sort((a, b) => a - b);
     const boatUpgrades: SaveData['boatUpgrades'] = {};
     const boatCondition: SaveData['boatCondition'] = {};
     for (const index of owned) {
       const previous = data.boatUpgrades?.[index] || (index === selected ? data.upgrades : undefined);
       boatUpgrades[index] = { engine: Math.max(0, Math.min(3, Number(previous?.engine) || 0)), hull: Math.max(0, Math.min(3, Number(previous?.hull) || 0)) };
-      boatCondition[index] = Math.max(30, Math.min(100, Number(data.boatCondition?.[index]) || 100));
+      boatCondition[index] = index === BACKUP_BOAT_INDEX ? 100 : Math.max(30, Math.min(100, Number(data.boatCondition?.[index]) || 100));
     }
     const restored: SaveData = { cash: Math.max(0, data.cash), reputation: Number(data.reputation) || 0, boat: owned.includes(selected) ? selected : 0,
       ownedBoats: owned, port: Number.isInteger(data.port) && data.port! >= 0 && data.port! < HARBORS.length ? data.port! : 0,
@@ -278,6 +281,7 @@ export function loadSave(): SaveData {
       yardUpgrades: { repairBay: Math.max(0, Math.min(3, Number(data.yardUpgrades?.repairBay) || 0)), brokerDesk: Math.max(0, Math.min(3, Number(data.yardUpgrades?.brokerDesk) || 0)) },
       runs: Math.max(0, Number(data.runs) || 0), level: Math.max(1, Math.floor(Number(data.level) || (Math.max(0, Number(data.runs) || 0) + 1))),
       soundTutorialSeen: data.soundTutorialSeen === true, sound: typeof data.sound === 'boolean' ? data.sound : initial.sound };
+    if (restored.boat !== BACKUP_BOAT_INDEX && restored.boatCondition[restored.boat] < MIN_SEAWORTHY_CONDITION && restored.cash < repairCost(restored)) restored.boat = BACKUP_BOAT_INDEX;
     refreshHarborUnlocks(restored);
     if (!restored.unlockedPorts.includes(restored.port)) restored.port = 0;
     return restored;

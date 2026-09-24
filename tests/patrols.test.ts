@@ -2,6 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { patrolPose } from '../src/patrols';
 
+test('night lights increase patrol sight and detection heat', async () => {
+  const { sightProfile, inVisionCone } = await import('../src/patrols');
+  const lit = sightProfile(true, true), dark = sightProfile(true, false);
+  assert.ok(lit.rangeMultiplier > dark.rangeMultiplier);
+  assert.ok(lit.heatRate > dark.heatRate);
+  const patrol = { x: 0, z: 0, heading: 0 };
+  assert.equal(inVisionCone(patrol, 0, 12, 10 * lit.rangeMultiplier, lit.halfAngle), true);
+  assert.equal(inVisionCone(patrol, 0, 12, 10 * dark.rangeMultiplier, dark.halfAngle), false);
+});
+
 test('patrol routes travel across, lengthwise, and around an oval while turning', () => {
   const routes = [0, 1, 2].map(index =>
     Array.from({ length: 72 }, (_, sample) => patrolPose(index, sample * 0.2, 0, 100, 0)));

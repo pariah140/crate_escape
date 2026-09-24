@@ -1,5 +1,12 @@
 export interface PatrolPose { x: number; z: number; heading: number }
 
+export function sightProfile(night: boolean, lightsOn: boolean): { rangeMultiplier: number; halfAngle: number; heatRate: number } {
+  if (!night) return { rangeMultiplier: 1, halfAngle: .52, heatRate: 37 };
+  return lightsOn
+    ? { rangeMultiplier: 1.55, halfAngle: .72, heatRate: 56 }
+    : { rangeMultiplier: .68, halfAngle: .42, heatRate: 25 };
+}
+
 export function inVisionCone(patrol: PatrolPose, boatX: number, boatZ: number, range = 13, halfAngle = .46): boolean {
   const dx = boatX - patrol.x, dz = boatZ - patrol.z;
   const forward = dx * Math.sin(patrol.heading) + dz * Math.cos(patrol.heading);

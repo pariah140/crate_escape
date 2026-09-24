@@ -76,3 +76,7 @@ Each boat has a different low poly hull silhouette, cabin equipment, cargo footp
 ## Marketplace and harbor chart
 
 The marketplace is a full paper catalog ordered by price, with every boat's own silhouette, hold footprint, steering and hull side by side. The shipyard lists only owned boats and links to the catalog. The harbor chart is an illustrated 25-stop atlas: open stops use color, locked stops use dashed borders, each stop shows a miniature route and the exact unlock requirement and current gap. New harbors unlock in sequence through boat ownership, hold capacity and reputation, and stay open after purchase or boat switching.
+
+## Night voyages and dockyard inspection
+
+The night light switch changes both the visible area around the boat and patrol sight and heat gain. A lit boat is easier to pilot and easier to spot; lights off conceal hazards and reduce detection. The shipyard is a poured concrete service dock with marked bays, workshops, a gantry crane, containers, drums and moored boats. Choosing a boat from the scene or fleet list moves the camera in and shows that boat's condition, refit levels, repair cost and active status. The small Patchwork Sailboat is always owned and costs nothing to repair. It has at least one deliverable job in every harbor, giving the player a way to earn repair money after an expensive accident.

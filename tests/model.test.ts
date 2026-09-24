@@ -35,7 +35,7 @@ test('rotation normalizes a shape and occupied cells block later crates', () => 
 
 test('different hull outlines change usable cargo cells and reject wall overlap', async () => {
   const { BOATS, usableCells } = await import('../src/model');
-  assert.deepEqual(BOATS.map(usableCells), [12, 18, 22, 31, 44, 13, 26, 31, 36, 50]);
+  assert.deepEqual(BOATS.map(usableCells), [12, 18, 22, 31, 44, 13, 26, 31, 36, 50, 8]);
   const [crate] = piecesFor('teapots');
   assert.equal(canPlace(crate, 0, 0, [crate], 5, 4, BOATS[1].blocked), false);
   assert.equal(canPlace(crate, 1, 0, [crate], 5, 4, BOATS[1].blocked), true);
@@ -64,12 +64,33 @@ test('previous saves keep the owned speedboat and upgrades', async () => {
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => JSON.stringify({ cash: 36, boat: 1, port: 1, upgrades: { engine: 2, hull: 1 }, runs: 4, sound: false }) } });
   try {
     const restored = loadSave();
-    assert.deepEqual(restored.ownedBoats, [0, 1]);
+    assert.deepEqual(restored.ownedBoats, [0, 1, 10]);
     assert.deepEqual(restored.boatUpgrades[1], { engine: 2, hull: 1 });
     assert.equal(restored.port, 1);
     assert.ok(restored.unlockedPorts.includes(1));
     assert.equal(restored.yardUpgrades.brokerDesk, 0);
   } finally { Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: previous }); }
+});
+
+test('backup sailboat is always owned, free to repair, and can carry a job from every harbor', async () => {
+  const { BACKUP_BOAT_INDEX, BOATS, HARBORS, defaultSave, repairCost } = await import('../src/model');
+  const save = defaultSave();
+  const backup = BOATS[BACKUP_BOAT_INDEX];
+  assert.ok(save.ownedBoats.includes(BACKUP_BOAT_INDEX));
+  save.boatCondition[BACKUP_BOAT_INDEX] = 30;
+  assert.equal(repairCost(save, BACKUP_BOAT_INDEX), 0);
+  for (let port = 0; port < HARBORS.length; port++) {
+    const fits = jobsForPort(port).some(job => canFitAll(job.shapes.map((shape, index) => ({ id: `${port}-${index}`, jobId: job.id, shape, rotation: 0, x: null, y: null })), backup.width, backup.height, backup.blocked));
+    assert.ok(fits, `backup boat needs a deliverable job at ${HARBORS[port].name}`);
+  }
+});
+
+test('an unaffordable damaged boat restores into the backup sailboat', async () => {
+  const { BACKUP_BOAT_INDEX, loadSave } = await import('../src/model');
+  const previous = globalThis.localStorage;
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => JSON.stringify({ cash: 0, boat: 0, ownedBoats: [0], boatCondition: { 0: 30 } }) } });
+  try { assert.equal(loadSave().boat, BACKUP_BOAT_INDEX); }
+  finally { Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: previous }); }
 });
 
 test('saved voyage numbers are no longer capped at one hundred', async () => {
