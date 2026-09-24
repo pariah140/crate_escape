@@ -243,19 +243,36 @@ export class World {
           gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
         }`,
       fragmentShader: `uniform float uTime; uniform vec3 uDeep; uniform vec3 uLight; uniform vec3 uFoam; varying vec3 vWater;
+        float hash21(vec2 p) {
+          return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+        }
+        float localRipple(vec2 p, float size, float speed, float offset) {
+          vec2 cell = floor(p / size);
+          vec2 local = fract(p / size);
+          float seed = hash21(cell + offset);
+          vec2 center = vec2(0.22 + hash21(cell + offset + 2.7) * 0.56,
+                             0.22 + hash21(cell + offset + 7.3) * 0.56);
+          float age = fract(uTime * speed + seed);
+          float radius = mix(0.1, 0.31, age);
+          vec2 delta = (local - center) * vec2(1.0, 0.73);
+          float distanceToRing = abs(length(delta) - radius);
+          float arc = smoothstep(0.72, 0.94, cos(atan(delta.y, delta.x) - seed * 6.283));
+          return (1.0 - smoothstep(0.006, 0.021, distanceToRing)) * arc
+            * (1.0 - age) * step(0.43, seed);
+        }
         void main() {
           vec2 p = vWater.xz;
-          vec2 folded = p + vec2(sin(p.y * 0.21 + uTime * 0.45) * 1.3,
-            sin(p.x * 0.23 - uTime * 0.38) * 1.2);
-          float swell = sin(p.x * 0.29 + p.y * 0.18 - uTime * 0.8);
-          float crossing = sin(folded.y * 0.38 - folded.x * 0.22 + uTime * 1.15);
-          float small = sin(folded.x * 1.05 + folded.y * 0.72 - uTime * 2.0);
-          float shade = clamp(0.49 + swell * 0.16 + crossing * 0.13 + small * 0.045, 0.0, 1.0);
-          float crest = smoothstep(0.82, 0.98, crossing * 0.5 + swell * 0.4 + small * 0.1 + 0.52);
-          float ripple = sin(p.x * 1.9 - p.y * 0.85 + uTime * 2.6 + sin(p.y * 0.31 + uTime) * 0.6);
-          float ripples = smoothstep(0.82, 0.98, ripple) * (0.35 + 0.65 * smoothstep(0.0, 0.7, crossing));
+          vec2 folded = p + vec2(sin(p.y * 0.19 + uTime * 0.38) * 2.1,
+            sin(p.x * 0.17 - uTime * 0.3) * 1.8);
+          float swell = sin(folded.x * 0.27 + folded.y * 0.15 - uTime * 0.74);
+          float crossing = sin(folded.y * 0.31 - folded.x * 0.24 + uTime * 0.98);
+          float shade = clamp(0.49 + swell * crossing * 0.22 + swell * 0.065
+            + sin(folded.x * 0.58 + cos(folded.y * 0.41 - uTime) * 1.4) * 0.035, 0.0, 1.0);
+          float ripples = localRipple(p, 13.0, 0.13, 0.0)
+            + localRipple(p + vec2(4.1, 6.7), 21.0, 0.09, 19.0);
+          float glint = smoothstep(0.72, 0.97, swell * crossing) * 0.06;
           vec3 color = mix(uDeep, uLight, shade);
-          color = mix(color, uFoam, crest * 0.13 + ripples * 0.12);
+          color = mix(color, uFoam, min(0.26, ripples * 0.24 + glint));
           gl_FragColor = vec4(color, 0.82);
           #include <colorspace_fragment>
         }`,
