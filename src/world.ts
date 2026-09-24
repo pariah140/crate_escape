@@ -139,8 +139,18 @@ function makeGull(): { group: THREE.Group; wings: THREE.Mesh[] } {
   return { group, wings };
 }
 
+function makeHullFoam(width: number, length: number): THREE.Mesh {
+  const foam = new THREE.Mesh(
+    new THREE.RingGeometry(0.88, 1, 28),
+    new THREE.MeshBasicMaterial({ color: '#d8f8e7', side: THREE.DoubleSide, transparent: true, opacity: 0.45, depthWrite: false }),
+  );
+  foam.rotation.x = -Math.PI / 2;
+  foam.scale.set(width, length, 1);
+  return foam;
+}
+
 export interface Hazard { x: number; z: number; radius: number; kind: 'rock' | 'buoy'; mesh: THREE.Group; }
-export interface Patrol { x: number; z: number; baseX: number; phase: number; mesh: THREE.Group; light: THREE.Mesh; }
+export interface Patrol { x: number; z: number; baseX: number; phase: number; mesh: THREE.Group; light: THREE.Mesh; foam: THREE.Mesh; wake: THREE.Mesh; }
 
 export class World {
   readonly renderer: THREE.WebGLRenderer;
@@ -154,7 +164,8 @@ export class World {
   private readonly raycaster = new THREE.Raycaster();
   private readonly waterPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   private readonly targetMarker = new THREE.Group();
-  private readonly shadowBlob: THREE.Mesh;
+  private readonly boatFoam: THREE.Mesh;
+  private readonly bowWash = new THREE.Group();
   private readonly impactRing: THREE.Mesh;
   private readonly splashDrops: Array<{ mesh: THREE.Mesh; vx: number; vy: number; vz: number }> = [];
   private readonly wakes: THREE.Mesh[] = [];
@@ -211,8 +222,18 @@ export class World {
     this.ocean = new THREE.Mesh(new THREE.PlaneGeometry(130, 1150, 30, 170), water);
     this.ocean.rotation.x = -Math.PI / 2; this.ocean.position.set(0, -0.04, 260); this.scene.add(this.ocean);
     this.scene.add(this.route); this.scene.add(this.boat);
-    this.shadowBlob = new THREE.Mesh(new THREE.CircleGeometry(2.05, 16), new THREE.MeshBasicMaterial({ color: '#075466', transparent: true, opacity: 0.3, depthWrite: false }));
-    this.shadowBlob.rotation.x = -Math.PI / 2; this.shadowBlob.position.y = 0.015; this.scene.add(this.shadowBlob);
+    this.boatFoam = makeHullFoam(1.68, 2.55);
+    this.scene.add(this.boatFoam);
+    for (const side of [-1, 1]) {
+      const wash = new THREE.Mesh(
+        new THREE.BoxGeometry(0.1, 0.012, 1.25),
+        new THREE.MeshBasicMaterial({ color: '#e0f9ed', transparent: true, opacity: 0.62, depthWrite: false }),
+      );
+      wash.position.set(side * 1.2, 0, 1.25);
+      wash.rotation.y = side * 0.42;
+      this.bowWash.add(wash);
+    }
+    this.scene.add(this.bowWash);
     const markerRing = new THREE.Mesh(new THREE.RingGeometry(0.47, 0.62, 18), new THREE.MeshBasicMaterial({ color: '#ffe27d', side: THREE.DoubleSide, transparent: true, opacity: 0.9, depthWrite: false }));
     markerRing.rotation.x = -Math.PI / 2; markerRing.position.y = 0.08; this.targetMarker.add(markerRing);
     const markerDot = new THREE.Mesh(new THREE.CircleGeometry(0.12, 10), new THREE.MeshBasicMaterial({ color: '#fff5da', side: THREE.DoubleSide }));
@@ -273,10 +294,16 @@ export class World {
     for (let i = 0; i < 6; i++) {
       const z = 55 + i * 78;
       const x = i % 2 ? -4 : 4;
-      const mesh = makeBoat('#527798', true); mesh.scale.setScalar(0.72); mesh.position.set(x, 0, z); mesh.rotation.y = Math.PI; this.route.add(mesh);
+      const mesh = makeBoat('#527798', true); mesh.scale.setScalar(0.72); mesh.position.set(x, -0.68, z); mesh.rotation.y = Math.PI; this.route.add(mesh);
+      const foam = makeHullFoam(1.22, 1.86); foam.position.set(x, 0.04, z); this.route.add(foam);
+      const wake = new THREE.Mesh(
+        new THREE.TorusGeometry(0.58, 0.045, 3, 10, Math.PI),
+        new THREE.MeshBasicMaterial({ color: '#d8f8e7', transparent: true, opacity: 0.32, depthWrite: false }),
+      );
+      wake.rotation.x = -Math.PI / 2; wake.position.set(x, 0.05, z + 2); this.route.add(wake);
       const light = new THREE.Mesh(new THREE.ConeGeometry(3.6, 9, 18, 1, true), new THREE.MeshBasicMaterial({ color: '#fff1a0', transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide }));
       light.rotation.x = Math.PI / 2; light.position.set(0, 1.2, -5); mesh.add(light);
-      this.patrols.push({ x, z, baseX: x, phase: i * 1.8, mesh, light });
+      this.patrols.push({ x, z, baseX: x, phase: i * 1.8, mesh, light, foam, wake });
     }
     // Small moving glints add texture without a remote water asset.
     this.waterMarks.forEach(mark => this.scene.remove(mark)); this.waterMarks.length = 0;
@@ -311,11 +338,19 @@ export class World {
   resize(): void {
     const rect = this.renderer.domElement.parentElement!.getBoundingClientRect();
     this.width = Math.max(rect.width, 1); this.height = Math.max(rect.height, 1);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.width < 720 ? 1.25 : 1.75));
+    this.renderer.shadowMap.enabled = this.width >= 720;
     this.renderer.setSize(this.width, this.height, false);
     const aspect = this.width / this.height;
     const span = this.width < 720 ? 38 : 43;
     this.camera.left = -span * aspect / 2; this.camera.right = span * aspect / 2;
     this.camera.top = span / 2; this.camera.bottom = -span / 2; this.camera.updateProjectionMatrix();
+  }
+
+  private waterHeight(x: number, z: number): number {
+    // Keep the hull and foam in phase with the ocean vertex shader.
+    return -0.04 + Math.sin(x * 0.42 + this.elapsed * 1.1) * 0.08
+      + Math.sin((260 - z) * 0.25 - this.elapsed * 0.85) * 0.06;
   }
 
   update(dt: number, running: boolean, x: number, z: number, heat: number, boatSpeed: number, vx = 0, vz = 0, target: { x: number; z: number } | null = null): void {
@@ -326,10 +361,23 @@ export class World {
       const difference = Math.atan2(Math.sin(targetHeading - this.heading), Math.cos(targetHeading - this.heading));
       this.heading += difference * Math.min(1, dt * 3.2);
     }
-    this.boat.position.set(x, Math.sin(this.elapsed * 3.4) * 0.055, z);
-    this.boat.rotation.set(0, this.heading, Math.sin(this.elapsed * 2.4) * 0.035 + (this.damageTime > 0 ? Math.sin(this.elapsed * 46) * this.damageTime * 0.17 : 0));
-    this.shadowBlob.position.set(x + 0.25, 0.015, z - 0.2);
-    this.shadowBlob.rotation.z = -this.heading;
+    const surface = this.waterHeight(x, z);
+    const bob = Math.sin(this.elapsed * 2.15 + z * 0.15) * 0.04;
+    this.boat.position.set(x, surface - 0.94 + bob, z);
+    this.boat.rotation.set(
+      Math.sin(this.elapsed * 1.75 + z * 0.08) * 0.038 + vz * 0.003,
+      this.heading,
+      Math.sin(this.elapsed * 2.1 + x * 0.3) * 0.045 - vx * 0.007 + (this.damageTime > 0 ? Math.sin(this.elapsed * 46) * this.damageTime * 0.17 : 0),
+    );
+    this.boatFoam.position.set(x, surface + 0.06, z);
+    this.boatFoam.rotation.z = -this.heading;
+    (this.boatFoam.material as THREE.MeshBasicMaterial).opacity = 0.35 + Math.min(boatSpeed / 9.2, 1) * 0.25 + Math.sin(this.elapsed * 4) * 0.04;
+    this.bowWash.position.set(x, surface + 0.075, z);
+    this.bowWash.rotation.y = this.heading;
+    this.bowWash.visible = running && boatSpeed > 0.8;
+    this.bowWash.children.forEach((child, index) => {
+      (child as THREE.Mesh).scale.z = 0.85 + Math.sin(this.elapsed * 8 + index * 1.3) * 0.15;
+    });
     this.targetMarker.visible = Boolean(running && target);
     if (target) {
       this.targetMarker.position.set(target.x, 0, target.z);
@@ -339,7 +387,9 @@ export class World {
     for (let i = 0; i < this.wakes.length; i++) {
       const wake = this.wakes[i];
       const distance = 2.9 + i * 0.75;
-      wake.position.set(x - Math.sin(this.heading) * distance, 0.03, z - Math.cos(this.heading) * distance);
+      const wakeX = x - Math.sin(this.heading) * distance;
+      const wakeZ = z - Math.cos(this.heading) * distance;
+      wake.position.set(wakeX, this.waterHeight(wakeX, wakeZ) + 0.065, wakeZ);
       wake.rotation.z = Math.PI - this.heading;
       wake.visible = running && boatSpeed > 0.8;
     }
@@ -386,13 +436,22 @@ export class World {
       if (chasing) patrol.x += (x - patrol.x) * 0.55;
       patrol.mesh.position.x = patrol.x;
       patrol.mesh.position.z = chasing ? Math.max(patrol.z, z + 1.15) : patrol.z + Math.sin(this.elapsed * 0.8 + i) * 2;
+      const patrolSurface = this.waterHeight(patrol.mesh.position.x, patrol.mesh.position.z);
+      patrol.mesh.position.y = patrolSurface - 0.68 + Math.sin(this.elapsed * 2 + patrol.phase) * 0.02;
+      patrol.mesh.rotation.x = Math.sin(this.elapsed * 1.7 + patrol.phase) * 0.024;
+      patrol.mesh.rotation.z = Math.sin(this.elapsed * 2.1 + patrol.phase) * 0.035;
+      patrol.foam.position.set(patrol.mesh.position.x, patrolSurface + 0.055, patrol.mesh.position.z);
+      (patrol.foam.material as THREE.MeshBasicMaterial).opacity = 0.38 + Math.sin(this.elapsed * 3.3 + patrol.phase) * 0.06;
+      const wakeZ = patrol.mesh.position.z + 2;
+      patrol.wake.position.set(patrol.x, this.waterHeight(patrol.x, wakeZ) + 0.06, wakeZ);
       (patrol.light.material as THREE.MeshBasicMaterial).opacity = 0.12 + Math.sin(this.elapsed * 2 + i) * 0.03;
     });
-    const targetZ = running ? z + 10 : -7;
+    const narrow = this.width < 720;
+    const targetZ = running ? z + (narrow ? 5 : 10) : -7;
     const targetX = running ? x * 0.5 : 0;
     const factor = Math.min(1, dt * 2.5);
-    this.camera.position.lerp(new THREE.Vector3(targetX + 16, 31, targetZ - 28), factor);
-    this.camera.lookAt(targetX, 0, targetZ + 5);
+    this.camera.position.lerp(new THREE.Vector3(targetX + (narrow ? 6 : 16), 31, targetZ - (narrow ? 25 : 28)), factor);
+    this.camera.lookAt(targetX, 0, targetZ + (narrow ? 2 : 5));
     if (this.damageTime > 0) this.camera.position.x += Math.sin(this.elapsed * 63) * this.damageTime * 0.08;
     this.renderer.render(this.scene, this.camera);
   }
