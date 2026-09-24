@@ -119,14 +119,23 @@ function makeHarbour(parent: THREE.Object3D, z: number, destination = false): vo
 
 function makeFish(color: string): { group: THREE.Group; tail: THREE.Group } {
   const fish = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.IcosahedronGeometry(0.48, 0), mat(color));
-  body.scale.set(0.72, 0.4, 1.2); body.position.y = 0.18; fish.add(body);
-  const tail = new THREE.Group(); tail.position.set(0, 0.18, -0.49); fish.add(tail);
-  const fin = cone(tail, color, 0, 0, -0.18, 0.34, 0.54, 3); fin.rotation.x = -Math.PI / 2;
-  cone(fish, '#f8df98', 0, 0.47, 0.03, 0.15, 0.32, 3);
+  const silhouette = new THREE.Shape();
+  silhouette.moveTo(0, 0.69);
+  silhouette.bezierCurveTo(0.35, 0.5, 0.44, 0.09, 0.31, -0.22);
+  silhouette.lineTo(0.17, -0.53); silhouette.lineTo(-0.17, -0.53);
+  silhouette.lineTo(-0.31, -0.22);
+  silhouette.bezierCurveTo(-0.44, 0.09, -0.35, 0.5, 0, 0.69);
+  const body = new THREE.Mesh(new THREE.ShapeGeometry(silhouette, 6), new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide }));
+  body.rotation.x = Math.PI / 2; fish.add(body);
+  const tail = new THREE.Group(); tail.position.z = -0.51; fish.add(tail);
+  const tailShape = new THREE.Shape();
+  tailShape.moveTo(0, 0.05); tailShape.lineTo(0.32, -0.39);
+  tailShape.lineTo(0, -0.22); tailShape.lineTo(-0.32, -0.39); tailShape.closePath();
+  const fin = new THREE.Mesh(new THREE.ShapeGeometry(tailShape), new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide }));
+  fin.rotation.x = Math.PI / 2; tail.add(fin);
   for (const side of [-1, 1]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.045, 5, 4), mat('#183f4e'));
-    eye.position.set(side * 0.28, 0.27, 0.31); fish.add(eye);
+    const eye = new THREE.Mesh(new THREE.CircleGeometry(0.045, 6), new THREE.MeshBasicMaterial({ color: '#a9d7d5', side: THREE.DoubleSide }));
+    eye.rotation.x = Math.PI / 2; eye.position.set(side * 0.13, 0.018, 0.43); fish.add(eye);
   }
   return { group: fish, tail };
 }
@@ -190,7 +199,7 @@ export class World {
   private readonly splashDrops: Array<{ mesh: THREE.Mesh; vx: number; vy: number; vz: number }> = [];
   private readonly wakes: THREE.Mesh[] = [];
   private readonly waterMarks: THREE.Group[] = [];
-  private readonly fishSchools: Array<{ group: THREE.Group; baseX: number; baseZ: number; phase: number; swimmers: Array<{ fish: THREE.Group; tail: THREE.Group; phase: number }>; ripple: THREE.Mesh }> = [];
+  private readonly fishSchools: Array<{ group: THREE.Group; baseX: number; baseZ: number; phase: number; swimmers: Array<{ fish: THREE.Group; tail: THREE.Group; phase: number }> }> = [];
   private readonly turtles: Array<{ group: THREE.Group; baseX: number; baseZ: number; phase: number }> = [];
   private readonly gulls: Array<{ group: THREE.Group; wings: THREE.Mesh[]; baseX: number; baseZ: number; phase: number }> = [];
   private heading = 0;
@@ -236,7 +245,7 @@ export class World {
           float shade = clamp(0.48 + broad * 0.16 + cross * 0.11 + chop * 0.035, 0.0, 1.0);
           float glint = smoothstep(0.79, 0.98, 0.5 + broad * 0.23 + cross * 0.24);
           vec3 color = mix(uDeep, uLight, shade) + uFoam * glint * 0.055;
-          gl_FragColor = vec4(color, 0.64);
+          gl_FragColor = vec4(color, 0.7);
           #include <colorspace_fragment>
         }`,
     });
@@ -334,7 +343,7 @@ export class World {
       line.castShadow = false; mark.position.set(((i * 37) % 25) - 12.5, 0, ((i * 73) % 560) - 20);
       this.scene.add(mark); this.waterMarks.push(mark);
     }
-    const colors = ['#ffe288', '#ff9d77', '#a7dcff', '#f5a5b6'];
+    const colors = ['#205a6d', '#286477', '#2f6d7d', '#315e70'];
     for (let i = 0; i < 10; i++) {
       const baseZ = 18 + i * 52;
       const baseX = i % 2 ? -6.3 : 6.2;
@@ -342,13 +351,11 @@ export class World {
       const swimmers: Array<{ fish: THREE.Group; tail: THREE.Group; phase: number }> = [];
       for (let j = 0; j < 4; j++) {
         const { group: fish, tail } = makeFish(colors[(i + j) % colors.length]);
-        fish.position.set((j % 2) * 0.8, 0, Math.floor(j / 2) * 1.15);
-        fish.scale.setScalar(0.8 + (j % 2) * 0.18); school.add(fish);
+        fish.position.set(j % 2 ? 0.58 : -0.58, 0, (Math.floor(j / 2) - 0.5) * 1.35);
+        fish.scale.setScalar(1.08 + (j % 2) * 0.14); school.add(fish);
         swimmers.push({ fish, tail, phase: j * 1.4 + i * 0.3 });
       }
-      const ripple = new THREE.Mesh(new THREE.RingGeometry(0.8, 0.87, 20), new THREE.MeshBasicMaterial({ color: '#c6ece5', side: THREE.DoubleSide, transparent: true, opacity: 0.13, depthWrite: false }));
-      ripple.rotation.x = -Math.PI / 2; this.route.add(ripple);
-      this.route.add(school); this.fishSchools.push({ group: school, baseX, baseZ, phase: i * 1.47, swimmers, ripple });
+      this.route.add(school); this.fishSchools.push({ group: school, baseX, baseZ, phase: i * 1.47, swimmers });
     }
     for (let i = 0; i < 6; i++) {
       const turtle = makeTurtle(); this.route.add(turtle);
@@ -423,19 +430,17 @@ export class World {
       if (mark.position.z > 540) mark.position.z = -20;
       mark.position.x += Math.sin(this.elapsed * 0.7 + i) * dt * 0.035;
     });
-    this.fishSchools.forEach(({ group, baseX, baseZ, phase, swimmers, ripple }) => {
+    this.fishSchools.forEach(({ group, baseX, baseZ, phase, swimmers }) => {
       const swimTime = this.elapsed * 0.62 + phase;
       const swimX = baseX + Math.sin(swimTime) * 2.2;
       const swimZ = baseZ + Math.cos(swimTime) * 3.2;
-      group.position.set(swimX, -0.68 + Math.sin(this.elapsed * 1.8 + phase) * 0.035, swimZ);
+      group.position.set(swimX, -0.48 + Math.sin(this.elapsed * 1.8 + phase) * 0.02, swimZ);
       group.rotation.y = Math.atan2(Math.cos(swimTime) * 2.2, -Math.sin(swimTime) * 3.2);
       swimmers.forEach(({ fish, tail, phase: fishPhase }) => {
         tail.rotation.y = Math.sin(this.elapsed * 9 + fishPhase) * 0.52;
-        fish.position.y = Math.sin(this.elapsed * 3.4 + fishPhase) * 0.035;
+        fish.position.y = Math.sin(this.elapsed * 3.4 + fishPhase) * 0.02;
         fish.rotation.y = Math.sin(this.elapsed * 9 + fishPhase) * 0.06;
       });
-      ripple.position.set(swimX, this.waterHeight(swimX, swimZ) + 0.055, swimZ);
-      ripple.scale.setScalar(1.05 + Math.sin(this.elapsed * 3 + phase) * 0.1);
     });
     this.turtles.forEach(({ group, baseX, baseZ, phase }) => {
       group.position.set(baseX + Math.sin(this.elapsed * 0.35 + phase) * 1.1, Math.sin(this.elapsed * 1.1 + phase) * 0.05, baseZ + Math.cos(this.elapsed * 0.3 + phase) * 2.3);
