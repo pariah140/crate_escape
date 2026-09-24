@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { patrolPose } from './patrols';
+import { BOATS, type BoatDefinition, type BoatStyle } from './model';
 
 const mat = (color: string, roughness = 0.85) => new THREE.MeshStandardMaterial({ color, roughness, flatShading: true });
 const palette = {
@@ -22,55 +23,64 @@ function cylinder(parent: THREE.Object3D, color: string, x: number, y: number, z
   mesh.position.set(x, y, z); mesh.castShadow = true; parent.add(mesh); return mesh;
 }
 
-function makeBoat(color: string, patrol = false): THREE.Group {
-  const boat = new THREE.Group();
-  const shape = new THREE.Shape();
-  shape.moveTo(0, -2.45); shape.lineTo(-1.25, -1.22); shape.lineTo(-1.34, 1.58);
-  shape.quadraticCurveTo(0, 2.12, 1.34, 1.58); shape.lineTo(1.25, -1.22); shape.closePath();
-  const hull = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.72, bevelEnabled: true, bevelThickness: 0.14, bevelSize: 0.12, bevelSegments: 2, curveSegments: 5 }), mat(color));
-  hull.rotation.x = -Math.PI / 2; hull.position.y = 0.85; hull.castShadow = true; hull.receiveShadow = true; boat.add(hull);
-  const deck = new THREE.Mesh(new THREE.ShapeGeometry(shape, 5), mat('#fff6d9'));
-  deck.rotation.x = -Math.PI / 2; deck.position.y = 1.66; deck.scale.set(0.82, 0.83, 1); deck.receiveShadow = true; boat.add(deck);
-  const railPath = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(0, 1.7, 2.34), new THREE.Vector3(-1.15, 1.7, 1.13),
-    new THREE.Vector3(-1.24, 1.7, -1.52), new THREE.Vector3(0, 1.7, -1.96),
-    new THREE.Vector3(1.24, 1.7, -1.52), new THREE.Vector3(1.15, 1.7, 1.13),
-  ], true, 'centripetal');
-  const rail = new THREE.Mesh(new THREE.TubeGeometry(railPath, 44, 0.075, 5, true), mat(patrol ? '#dceef0' : '#fff1bd'));
-  rail.castShadow = true; boat.add(rail);
-  box(boat, patrol ? '#d4e6eb' : '#a97953', 0, 1.75, -1.22, 1.55, 0.16, 0.55);
-  box(boat, '#fff3d5', 0, 1.99, -0.34, 1.2, 0.62, 1.08);
-  box(boat, '#7cc6bd', 0, 2.05, 0.22, 0.78, 0.28, 0.06);
+function makeBoat(color: string, style: BoatStyle | 'patrol' = 'dinghy'): THREE.Group {
+  const craft = new THREE.Group();
+  const broad = style === 'trawler' || style === 'freighter';
+  const long = style === 'cruiser' || style === 'freighter';
+  const half = style === 'dinghy' || style === 'patrol' ? 1.28 : style === 'speedboat' ? 1.12 : broad ? 1.65 : 1.4;
+  const front = style === 'speedboat' ? 2.9 : long ? 3.15 : 2.35;
+  const back = long ? -2.9 : -2.15;
+  const outline = new THREE.Shape();
+  outline.moveTo(0, front); outline.lineTo(-half * (style === 'speedboat' ? 0.94 : 0.72), front - 0.45);
+  outline.lineTo(-half, front - (style === 'speedboat' ? 1.7 : 0.85));
+  outline.lineTo(-half, back + 0.38); outline.quadraticCurveTo(-half * 0.86, back, 0, back);
+  outline.quadraticCurveTo(half * 0.86, back, half, back + 0.38);
+  outline.lineTo(half, front - (style === 'speedboat' ? 1.7 : 0.85));
+  outline.lineTo(half * (style === 'speedboat' ? 0.94 : 0.72), front - 0.45); outline.closePath();
+  const hull = new THREE.Mesh(new THREE.ExtrudeGeometry(outline, { depth: broad ? 0.92 : 0.72, bevelEnabled: true, bevelThickness: 0.12, bevelSize: 0.1, bevelSegments: 2, curveSegments: 5 }), mat(color));
+  hull.rotation.x = -Math.PI / 2; hull.position.y = 0.83; hull.castShadow = true; craft.add(hull);
+  const deck = new THREE.Mesh(new THREE.ShapeGeometry(outline), mat(style === 'freighter' ? '#d9e1c4' : '#fff5d6'));
+  deck.rotation.x = -Math.PI / 2; deck.position.y = broad ? 1.82 : 1.61; deck.scale.set(0.83, 0.83, 1); craft.add(deck);
+  const railPoints = [new THREE.Vector3(0, broad ? 1.9 : 1.68, front - 0.22), new THREE.Vector3(-half * .91, broad ? 1.9 : 1.68, front - 1.08), new THREE.Vector3(-half * .91, broad ? 1.9 : 1.68, back + .43), new THREE.Vector3(0, broad ? 1.9 : 1.68, back + .19), new THREE.Vector3(half * .91, broad ? 1.9 : 1.68, back + .43), new THREE.Vector3(half * .91, broad ? 1.9 : 1.68, front - 1.08)];
+  craft.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(railPoints, true), 44, .06, 5, true), mat(style === 'patrol' ? '#dceef0' : '#ffe9ac')));
+  const cabinZ = style === 'freighter' ? back + 0.85 : style === 'trawler' ? 0.15 : style === 'speedboat' ? -0.6 : -0.34;
+  const cabinY = broad ? 2.08 : 1.95;
+  const cabinW = style === 'freighter' ? 2.35 : style === 'trawler' ? 1.8 : style === 'cruiser' ? 1.9 : 1.18;
+  const cabinD = style === 'cruiser' ? 1.95 : style === 'freighter' ? 1.35 : style === 'trawler' ? 1.35 : 1.08;
+  box(craft, '#fff2d9', 0, cabinY, cabinZ, cabinW, style === 'freighter' ? 0.95 : 0.64, cabinD);
+  box(craft, style === 'patrol' ? '#496e88' : style === 'cruiser' ? '#f9c8ae' : style === 'freighter' ? '#7f9db2' : '#e88470', 0, cabinY + (style === 'freighter' ? .57 : .39), cabinZ, cabinW + .18, .16, cabinD + .2);
+  box(craft, '#83cbd0', 0, cabinY + .08, cabinZ + cabinD / 2 + .035, cabinW * .68, .28, .06);
   for (const side of [-1, 1]) {
-    box(boat, '#7cc6bd', side * 0.62, 2.04, -0.35, 0.065, 0.26, 0.43);
-    const roof = box(boat, patrol ? '#456d89' : '#ed9177', side * 0.36, 2.39, -0.34, 0.81, 0.11, 1.34);
-    roof.rotation.z = -side * 0.39;
-    for (const portholeZ of [-0.85, 0.75]) {
-      const porthole = new THREE.Mesh(new THREE.CircleGeometry(0.13, 9), new THREE.MeshBasicMaterial({ color: '#8bdbd4', side: THREE.DoubleSide }));
-      porthole.rotation.y = Math.PI / 2; porthole.position.set(side * 1.37, 1.26, portholeZ); boat.add(porthole);
-      const rim = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.035, 4, 10), mat('#ffe2a0'));
-      rim.rotation.y = Math.PI / 2; rim.position.set(side * 1.38, 1.26, portholeZ); boat.add(rim);
+    box(craft, '#8bd1d1', side * (cabinW / 2 + .025), cabinY + .06, cabinZ, .06, .25, cabinD * .45);
+    for (const portholeZ of [back + .68, front - 1.15]) {
+      const port = new THREE.Mesh(new THREE.CircleGeometry(.13, 9), new THREE.MeshBasicMaterial({ color: '#a5e1dc', side: THREE.DoubleSide }));
+      port.rotation.y = Math.PI / 2; port.position.set(side * (half + .02), 1.26, portholeZ); craft.add(port);
     }
   }
-  cylinder(boat, patrol ? '#e9f5ef' : '#fff5da', 0, 1.79, 1.48, 0.12, 0.16);
-  cylinder(boat, '#566976', 0, 1.79, -2.0, 0.23, 0.25);
-  if (patrol) {
-    cylinder(boat, '#ffe36b', 0, 2.64, -0.38, 0.2, 0.13);
-    cone(boat, '#ffedab', 0, 2.77, -0.38, 0.14, 0.15, 6);
+  if (style === 'speedboat') {
+    for (const side of [-1, 1]) box(craft, '#415c72', side * .46, 1.16, back - .13, .3, .35, .46);
+    box(craft, '#e8f4ec', 0, 1.65, 1.38, 1.23, .12, .14).rotation.x = -.28;
+  } else if (style === 'trawler') {
+    cylinder(craft, '#8e7253', 0, 3.04, cabinZ, .08, 1.6);
+    cone(craft, '#fff0c8', .44, 3.42, cabinZ, .42, .7, 3).rotation.z = -.28;
+    for (const side of [-1, 1]) box(craft, '#d9ab6b', side * 1.39, 1.92, .45, .2, .15, 1.55);
+  } else if (style === 'cruiser') {
+    box(craft, '#fff7db', 0, 2.54, cabinZ - .35, 1.35, .13, .8);
+    for (const side of [-1, 1]) box(craft, '#f9deb2', side * 1.1, 1.76, 1.6, .23, .16, 1.4);
+  } else if (style === 'freighter') {
+    for (const side of [-1, 1]) for (let i = 0; i < 2; i++) box(craft, ['#ecab76', '#8dcaaf', '#e7cf82', '#a8b1de'][(side + 1) + i], side * .72, 2.05 + i * .35, 1.3, 1.25, .33, 1.23);
+    cylinder(craft, '#eef3dc', 0, 3.17, cabinZ, .085, 1.1);
   } else {
-    const crateColors = ['#ffd95d', '#f49d77', '#8ed6ad'];
-    const cargo = new THREE.Group(); cargo.name = 'deck-cargo'; boat.add(cargo);
-    crateColors.forEach((c, i) => {
-      const parcel = new THREE.Group();
-      parcel.position.set(i % 2 ? 0.4 : -0.4, 1.99 + (i === 2 ? 0.24 : 0), i === 2 ? -1.42 : -1.48);
-      box(parcel, c, 0, 0, 0, 0.62, 0.45, 0.53);
-      box(parcel, '#9a764e', 0, 0.02, 0, 0.055, 0.47, 0.56);
-      cargo.add(parcel);
-    });
-    cylinder(boat, '#f5f3d9', 0, 1.9, 1.37, 0.15, 0.22);
-    cone(boat, '#ffce5c', 0, 2.19, 1.37, 0.25, 0.35, 5);
+    cylinder(craft, '#f5f3d9', 0, 1.8, 1.38, .15, .22);
+    cone(craft, '#ffce5c', 0, 2.1, 1.38, .25, .35, 5);
   }
-  return boat;
+  if (style === 'patrol') cylinder(craft, '#ffe36b', 0, 2.62, cabinZ, .19, .15);
+  const cargo = new THREE.Group(); cargo.name = 'deck-cargo'; craft.add(cargo);
+  ['#ffd95d', '#f49d77', '#8ed6ad'].forEach((c, i) => {
+    const parcel = new THREE.Group(); parcel.position.set(i % 2 ? .38 : -.38, broad ? 2.1 + (i === 2 ? .22 : 0) : 1.92 + (i === 2 ? .22 : 0), style === 'freighter' ? .05 : back + .62);
+    box(parcel, c, 0, 0, 0, .59, .42, .52); box(parcel, '#9a764e', 0, .01, 0, .05, .43, .54); cargo.add(parcel);
+  });
+  return craft;
 }
 
 function makeRock(parent: THREE.Object3D, x: number, z: number, size: number): THREE.Group {
@@ -194,7 +204,10 @@ export class World {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.OrthographicCamera(-12, 12, 19, -19, 0.1, 200);
-  readonly boat = makeBoat(palette.coral);
+  boat = makeBoat(palette.coral);
+  private readonly yard = new THREE.Group();
+  private inYard = false;
+  private yardCount = 0;
   readonly hazards: Hazard[] = [];
   readonly patrols: Patrol[] = [];
   private readonly route = new THREE.Group();
@@ -290,7 +303,7 @@ export class World {
     this.ocean = new THREE.Mesh(new THREE.PlaneGeometry(220, 4000, 44, 500), water);
     this.ocean.rotation.x = -Math.PI / 2; this.ocean.position.set(0, -0.04, 260);
     this.ocean.renderOrder = -1; this.scene.add(this.ocean);
-    this.scene.add(this.route); this.scene.add(this.boat);
+    this.scene.add(this.route); this.scene.add(this.boat); this.scene.add(this.yard);
     this.boatFoam = makeHullFoam(1.68, 2.55);
     this.scene.add(this.boatFoam);
     for (const side of [-1, 1]) {
@@ -341,9 +354,45 @@ export class World {
     this.resize(); window.addEventListener('resize', () => this.resize());
   }
 
-  setBoatColor(color: string): void {
-    const hull = this.boat.children[0] as THREE.Mesh;
-    (hull.material as THREE.MeshStandardMaterial).color.set(color);
+  setBoat(craft: BoatDefinition): void {
+    this.scene.remove(this.boat);
+    this.boat = makeBoat(craft.color, craft.style);
+    this.scene.add(this.boat);
+    const size = craft.style === 'freighter' ? 1.42 : craft.style === 'cruiser' || craft.style === 'trawler' ? 1.22 : 1;
+    this.boatFoam.scale.set(1.68 * size, 2.55 * size, 1);
+  }
+
+  showShipyard(owned: number[], active: number): void {
+    this.inYard = true; this.yardCount = owned.length; this.yard.clear(); this.yard.visible = true; this.route.visible = false;
+    this.boat.visible = false; this.boatFoam.visible = false; this.bowWash.visible = false;
+    // A long timber quay with one moored, individual model for every owned craft.
+    box(this.yard, '#886448', 0, .48, -8.8, 68, .95, 5.2);
+    box(this.yard, '#c18b5b', 0, 1.02, -8.8, 68, .16, 5.2);
+    for (let i = 0; i < 17; i++) box(this.yard, '#805c43', -32 + i * 4, 1.13, -8.8, .1, .03, 5.2);
+    for (let i = 0; i < 6; i++) {
+      const x = -31 + i * 12;
+      cylinder(this.yard, '#6e5243', x, .82, -5.7, .21, 1.55);
+      cylinder(this.yard, '#e9d4a0', x, 1.59, -5.7, .23, .1);
+    }
+    box(this.yard, '#f9dda7', -18, 2.25, -13.3, 7.6, 2.9, 3.7);
+    const roof = box(this.yard, '#e37564', -18, 3.93, -13.3, 8.25, .36, 4.2); roof.rotation.z = -.05;
+    box(this.yard, '#95c9bb', -18, 2.1, -11.4, 2.7, 1.45, .12);
+    box(this.yard, '#f5d7a0', 13, 1.25, -10.2, 4.5, .5, 3.2);
+    for (const [slot, index] of owned.entries()) {
+      const def = BOATS[index]; const x = -23 + (slot - (owned.length - 1) / 2) * 7;
+      const model = makeBoat(def.color, def.style); model.position.set(x, -.35, -4.5); model.rotation.y = -.15; this.yard.add(model);
+      const foam = makeHullFoam(index >= 3 ? 2.4 : 1.8, index >= 3 ? 3.3 : 2.5); foam.position.set(x, .05, -4.5); this.yard.add(foam);
+      if (index === active) {
+        const ring = new THREE.Mesh(new THREE.RingGeometry(3.25, 3.38, 32), new THREE.MeshBasicMaterial({ color: '#ffe888', side: THREE.DoubleSide, transparent: true, opacity: .75 }));
+        ring.rotation.x = -Math.PI / 2; ring.position.set(x, .07, -4.5); this.yard.add(ring);
+      }
+    }
+  }
+
+  hideShipyard(): void {
+    if (!this.inYard) return;
+    this.inYard = false; this.yard.visible = false; this.route.visible = true;
+    this.boat.visible = true; this.boatFoam.visible = true;
   }
 
   resetVoyage(): void {
@@ -397,7 +446,7 @@ export class World {
       const z = 55 + i * 78;
       const x = i % 2 ? -4 : 4;
       const initial = patrolPose(i, 0, x, z, i * 1.8);
-      const mesh = makeBoat('#527798', true); mesh.scale.setScalar(0.72); mesh.position.set(initial.x, -0.68, initial.z); mesh.rotation.y = initial.heading; this.route.add(mesh);
+      const mesh = makeBoat('#527798', 'patrol'); mesh.scale.setScalar(0.72); mesh.position.set(initial.x, -0.68, initial.z); mesh.rotation.y = initial.heading; this.route.add(mesh);
       const foam = makeHullFoam(1.22, 1.86); foam.position.set(x, 0.04, z); this.route.add(foam);
       const wake = new THREE.Mesh(
         new THREE.TorusGeometry(0.58, 0.045, 3, 10, Math.PI),
@@ -476,7 +525,7 @@ export class World {
       target = null;
       running = true;
     }
-    this.ocean.position.x = x;
+    this.ocean.position.x = this.inYard ? 0 : x;
     if (running && boatSpeed > 0.3) {
       const targetHeading = Math.atan2(vx, vz);
       const difference = Math.atan2(Math.sin(targetHeading - this.heading), Math.cos(targetHeading - this.heading));
@@ -653,10 +702,10 @@ export class World {
       (patrol.light.material as THREE.MeshBasicMaterial).opacity = 0.12 + Math.sin(this.elapsed * 2 + i) * 0.03;
     });
     const narrow = this.width < 720;
-    const targetZ = this.docking ? z + (narrow ? 3 : 5) : running ? z + (narrow ? 8 : 14) : -7;
-    const targetX = this.docking ? x - 2.8 : running ? x : 0;
+    const targetZ = this.inYard ? -14 : this.docking ? z + (narrow ? 3 : 5) : running ? z + (narrow ? 8 : 14) : -7;
+    const targetX = this.inYard ? 0 : this.docking ? x - 2.8 : running ? x : 0;
     const factor = Math.min(1, dt * 2.5);
-    this.camera.zoom += ((this.docking ? 1.42 : 1) - this.camera.zoom) * factor;
+    this.camera.zoom += ((this.inYard ? (narrow ? .8 : Math.max(.7, 1.08 - (this.yardCount - 1) * .09)) : this.docking ? 1.42 : 1) - this.camera.zoom) * factor;
     this.camera.updateProjectionMatrix();
     this.camera.position.lerp(new THREE.Vector3(targetX + (narrow ? 6 : 16), 31, targetZ - (narrow ? 25 : 28)), factor);
     this.camera.lookAt(targetX, 0, targetZ + (narrow ? 2 : 5));

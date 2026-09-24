@@ -64,3 +64,7 @@ All actions are buttons. Primary actions are orange, secondary actions are paper
 ## Do's and Don'ts
 
 Do make the next game action obvious and leave the world visible. Do give a tap alternative to dragging. Do not use dark neon crime imagery, real agencies, or decorative controls without an action.
+
+## Fleet and shipyard
+
+Each boat has a different low poly hull silhouette, cabin equipment, cargo footprint, acceleration and turn rate. Larger hulls move deliberately through turns. The shipyard is a distinct quay scene displaying owned boats at berths. Fleet cards repeat the exact usable cell footprint from the packing view and make speed, handling, condition and prices legible. Boat refits stay with that boat; the workshop and broker's desk benefit the whole fleet.

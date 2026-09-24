@@ -25,3 +25,19 @@ test('open-water targets are not clamped to the route', () => {
   assert.ok(boat.x < -40);
   assert.ok(boat.z < 0);
 });
+
+test('large boats turn and stop more slowly than the dinghy', async () => {
+  const { BOATS } = await import('../src/model');
+  let nimble: Motion = { x: 0, z: 0, vx: 0, vz: 7 };
+  let heavy: Motion = { ...nimble };
+  for (let i = 0; i < 15; i++) {
+    nimble = advanceMotion(nimble, null, { x: 1, z: 0 }, 9.2, 1 / 60, BOATS[0]);
+    heavy = advanceMotion(heavy, null, { x: 1, z: 0 }, 9.2, 1 / 60, BOATS[4]);
+  }
+  assert.ok(nimble.vx > heavy.vx * 2);
+  for (let i = 0; i < 30; i++) {
+    nimble = advanceMotion(nimble, null, { x: 0, z: 0 }, 9.2, 1 / 60, BOATS[0]);
+    heavy = advanceMotion(heavy, null, { x: 0, z: 0 }, 9.2, 1 / 60, BOATS[4]);
+  }
+  assert.ok(Math.hypot(heavy.vx, heavy.vz) > Math.hypot(nimble.vx, nimble.vz));
+});

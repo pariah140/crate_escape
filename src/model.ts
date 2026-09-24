@@ -2,6 +2,14 @@ export type Phase = 'board' | 'pack' | 'run' | 'result' | 'yard';
 export type CargoKind = 'standard' | 'bulky' | 'hot' | 'perishable' | 'fragile' | 'vip';
 export type Cell = readonly [number, number];
 export type Shape = 'single' | 'domino' | 'line3' | 'square' | 'ell' | 'tee' | 'ess';
+export type BoatStyle = 'dinghy' | 'speedboat' | 'trawler' | 'cruiser' | 'freighter';
+export interface BoatDefinition {
+  name: string; style: BoatStyle; width: number; height: number; blocked: Cell[];
+  speed: number; turnRate: number; acceleration: number; coast: number; hull: number;
+  price: number; repairRate: number; color: string; description: string; handling: string;
+}
+export interface BoatUpgrades { engine: number; hull: number }
+export interface YardUpgrades { repairBay: number; brokerDesk: number }
 
 export interface Job {
   id: string;
@@ -15,6 +23,7 @@ export interface Job {
   note: string;
   color: string;
   icon: string;
+  rare?: boolean;
 }
 
 export interface Piece {
@@ -29,17 +38,31 @@ export interface Piece {
 export interface SaveData {
   cash: number;
   reputation: number;
-  boat: 0 | 1;
+  boat: number;
+  ownedBoats: number[];
   port: 0 | 1;
-  upgrades: { engine: number; hull: number };
+  boatUpgrades: Record<number, BoatUpgrades>;
+  boatCondition: Record<number, number>;
+  yardUpgrades: YardUpgrades;
   runs: number;
   sound: boolean;
 }
 
-export const BOATS = [
-  { name: 'Little Dinghy', width: 4, height: 3, speed: 1, hull: 100, price: 0, color: '#ff8557', description: 'A brave little boat with a snug hold.' },
-  { name: 'Skipjack Speedboat', width: 5, height: 3, speed: 1.24, hull: 105, price: 250, color: '#ffe166', description: 'More room, more zoom, more excuses.' },
-] as const;
+export const BOATS: BoatDefinition[] = [
+  { name: 'Little Dinghy', style: 'dinghy', width: 4, height: 3, blocked: [], speed: 1, turnRate: 3.8, acceleration: 2.7, coast: 1.25, hull: 100, price: 0, repairRate: 1, color: '#ff8557', handling: 'Nimble', description: 'Tiny turns and a snug, square hold.' },
+  { name: 'Skipjack Speedboat', style: 'speedboat', width: 5, height: 4, blocked: [[0, 0], [4, 0]], speed: 1.25, turnRate: 2.9, acceleration: 3.1, coast: 1.15, hull: 95, price: 250, repairRate: 1.2, color: '#ffe166', handling: 'Quick', description: 'Fast, pointed, and roomy behind the bow.' },
+  { name: 'Merry Trawler', style: 'trawler', width: 6, height: 4, blocked: [[0, 0], [5, 0]], speed: 0.91, turnRate: 2.0, acceleration: 1.8, coast: 0.85, hull: 145, price: 720, repairRate: 1.45, color: '#75c7a6', handling: 'Steady', description: 'A broad workboat that shrugs off bumps.' },
+  { name: 'Sunbeam Cruiser', style: 'cruiser', width: 7, height: 5, blocked: [[0, 0], [6, 0], [0, 4], [6, 4]], speed: 1.08, turnRate: 1.5, acceleration: 1.35, coast: 0.7, hull: 180, price: 1650, repairRate: 1.8, color: '#f49aa0', handling: 'Wide turns', description: 'Long decks, a pinched bow, and plenty of cargo room.' },
+  { name: 'Cloudbreak Freighter', style: 'freighter', width: 8, height: 6, blocked: [[0, 0], [7, 0], [3, 5], [4, 5]], speed: 0.82, turnRate: 0.9, acceleration: 0.9, coast: 0.48, hull: 250, price: 3400, repairRate: 2.2, color: '#a79cda', handling: 'Heavy turns', description: 'A floating warehouse with a slow, deliberate helm.' },
+];
+
+export const usableCells = (boat: BoatDefinition): number => boat.width * boat.height - boat.blocked.length;
+export const isBlocked = (x: number, y: number, blocked: readonly Cell[]): boolean => blocked.some(([bx, by]) => bx === x && by === y);
+export const boatUpgrade = (save: SaveData, index = save.boat): BoatUpgrades => save.boatUpgrades[index] || { engine: 0, hull: 0 };
+export const repairCost = (save: SaveData, index = save.boat): number => Math.ceil(
+  (100 - (save.boatCondition[index] ?? 100)) * BOATS[index].repairRate * (1 - save.yardUpgrades.repairBay * 0.18),
+);
+export const rareChance = (save: SaveData): number => 0.14 + save.yardUpgrades.brokerDesk * 0.16;
 
 export const PORTS = ['Sleepy Cove', 'Fogbank Harbour'] as const;
 
@@ -73,8 +96,21 @@ const fogJobs: Job[] = [
   { id: 'mystery2', client: 'Mr. Definitely Normal', cargo: 'Unlabelled crates', kind: 'hot', shapes: ['ess'], payout: 164, heat: 5, destination: 'The Back Pier', note: 'Best not to ask about the labels.', color: '#ec8b65', icon: '?' },
 ];
 
-export function jobsForPort(port: number): Job[] { return port === 0 ? coveJobs : fogJobs; }
-export function jobById(id: string): Job | undefined { return [...coveJobs, ...fogJobs].find(job => job.id === id); }
+const specialJobs: Job[][] = [
+  [{ id: 'pearl', client: 'The Pearl Conservatory', cargo: 'Moonlit pearls', kind: 'fragile', shapes: ['tee', 'domino'], payout: 265, heat: 3, destination: 'Starfish Wharf', note: 'Rare commission · handle every crate gently.', color: '#a8dded', icon: '✧', rare: true },
+    { id: 'festival', client: 'Harbour Festival', cargo: 'Firework lanterns', kind: 'vip', shapes: ['square', 'ell'], payout: 295, heat: 4, destination: 'Lantern Pier', note: 'Rare commission · keep the VIP crate centred.', color: '#f8b476', icon: '✦', rare: true }],
+  [{ id: 'crown', client: 'The Crown Museum', cargo: 'Lost crown jewels', kind: 'vip', shapes: ['square', 'tee'], payout: 390, heat: 5, destination: 'Royal Slip', note: 'Rare commission · the patrol is watching.', color: '#e2bf73', icon: '✧', rare: true },
+    { id: 'starlight', client: 'The Astral Society', cargo: 'Starlight bottles', kind: 'fragile', shapes: ['ess', 'domino'], payout: 360, heat: 3, destination: 'Moonbeam Dock', note: 'Rare commission · a very delicate delivery.', color: '#bca9ec', icon: '✦', rare: true }],
+];
+
+/** One stable offer per completed run. A better broker increases the offer frequency. */
+export function specialOfferFor(save: SaveData): Job | null {
+  const seed = ((save.runs + 1) * 1664525 + save.port * 1013904223) >>> 0;
+  const roll = ((seed ^ (seed >>> 16)) % 1000) / 1000;
+  return roll < rareChance(save) ? specialJobs[save.port][seed % specialJobs[save.port].length] : null;
+}
+export function jobsForPort(port: number, special: Job | null = null): Job[] { return [...(port === 0 ? coveJobs : fogJobs), ...(special ? [special] : [])]; }
+export function jobById(id: string): Job | undefined { return [...coveJobs, ...fogJobs, ...specialJobs.flat()].find(job => job.id === id); }
 
 export function rotatedCells(shape: Shape, rotation: number): Cell[] {
   let cells: Cell[] = SHAPES[shape].map(([x, y]) => [x, y]);
@@ -89,11 +125,11 @@ export function occupiedCells(piece: Piece): Cell[] {
   return rotatedCells(piece.shape, piece.rotation).map(([x, y]) => [x + piece.x!, y + piece.y!]);
 }
 
-export function canPlace(piece: Piece, x: number, y: number, pieces: Piece[], width: number, height: number): boolean {
+export function canPlace(piece: Piece, x: number, y: number, pieces: Piece[], width: number, height: number, blocked: readonly Cell[] = []): boolean {
   const used = new Set(pieces.filter(other => other.id !== piece.id).flatMap(other => occupiedCells(other).map(([cx, cy]) => `${cx},${cy}`)));
   return rotatedCells(piece.shape, piece.rotation).every(([cx, cy]) => {
     const px = x + cx, py = y + cy;
-    if (px < 0 || py < 0 || px >= width || py >= height || used.has(`${px},${py}`)) return false;
+    if (px < 0 || py < 0 || px >= width || py >= height || isBlocked(px, py, blocked) || used.has(`${px},${py}`)) return false;
     if (jobById(piece.jobId)?.kind === 'vip') {
       const centreX = (width - 1) / 2, centreY = (height - 1) / 2;
       if (!rotatedCells(piece.shape, piece.rotation).some(([vx, vy]) => Math.abs(x + vx - centreX) <= 0.5 && Math.abs(y + vy - centreY) <= 0.5)) return false;
@@ -103,9 +139,15 @@ export function canPlace(piece: Piece, x: number, y: number, pieces: Piece[], wi
 }
 
 /** Bitmask search keeps job acceptance instant, even when the hold is nearly full. */
-export function canFitAll(pieces: Piece[], width: number, height: number): boolean {
+export function canFitAll(pieces: Piece[], width: number, height: number, blocked: readonly Cell[] = []): boolean {
   let occupied = 0n;
-  for (const piece of pieces) for (const [x, y] of occupiedCells(piece)) occupied |= 1n << BigInt(y * width + x);
+  for (const [x, y] of blocked) occupied |= 1n << BigInt(y * width + x);
+  for (const piece of pieces) for (const [x, y] of occupiedCells(piece)) {
+    if (x < 0 || y < 0 || x >= width || y >= height) return false;
+    const bit = 1n << BigInt(y * width + x);
+    if (occupied & bit) return false;
+    occupied |= bit;
+  }
   const centreX = (width - 1) / 2, centreY = (height - 1) / 2;
   const choices = pieces.filter(piece => piece.x === null).map(piece => {
     const masks = new Set<bigint>();
@@ -134,14 +176,27 @@ export function canFitAll(pieces: Piece[], width: number, height: number): boole
 }
 
 export function defaultSave(): SaveData {
-  return { cash: 80, reputation: 0, boat: 0, port: 0, upgrades: { engine: 0, hull: 0 }, runs: 0, sound: true };
+  return { cash: 80, reputation: 0, boat: 0, ownedBoats: [0], port: 0, boatUpgrades: { 0: { engine: 0, hull: 0 } }, boatCondition: { 0: 100 }, yardUpgrades: { repairBay: 0, brokerDesk: 0 }, runs: 0, sound: true };
 }
 
 export function loadSave(): SaveData {
   try {
-    const data = JSON.parse(localStorage.getItem('crate-escape-save-v1') || 'null') as Partial<SaveData> | null;
+    const data = JSON.parse(localStorage.getItem('crate-escape-save-v1') || 'null') as (Partial<SaveData> & { upgrades?: BoatUpgrades }) | null;
     if (!data || typeof data.cash !== 'number') return defaultSave();
-    return { ...defaultSave(), ...data, upgrades: { ...defaultSave().upgrades, ...data.upgrades } };
+    const initial = defaultSave();
+    const selected = Number.isInteger(data.boat) && data.boat! >= 0 && data.boat! < BOATS.length ? data.boat! : 0;
+    const owned = [...new Set([0, ...(Array.isArray(data.ownedBoats) ? data.ownedBoats : [selected])])].filter(index => Number.isInteger(index) && index >= 0 && index < BOATS.length);
+    const boatUpgrades: SaveData['boatUpgrades'] = {};
+    const boatCondition: SaveData['boatCondition'] = {};
+    for (const index of owned) {
+      const previous = data.boatUpgrades?.[index] || (index === selected ? data.upgrades : undefined);
+      boatUpgrades[index] = { engine: Math.max(0, Math.min(3, Number(previous?.engine) || 0)), hull: Math.max(0, Math.min(3, Number(previous?.hull) || 0)) };
+      boatCondition[index] = Math.max(30, Math.min(100, Number(data.boatCondition?.[index]) || 100));
+    }
+    return { cash: Math.max(0, data.cash), reputation: Number(data.reputation) || 0, boat: owned.includes(selected) ? selected : 0,
+      ownedBoats: owned, port: data.port === 1 && owned.includes(1) ? 1 : 0, boatUpgrades, boatCondition,
+      yardUpgrades: { repairBay: Math.max(0, Math.min(3, Number(data.yardUpgrades?.repairBay) || 0)), brokerDesk: Math.max(0, Math.min(3, Number(data.yardUpgrades?.brokerDesk) || 0)) },
+      runs: Math.max(0, Number(data.runs) || 0), sound: typeof data.sound === 'boolean' ? data.sound : initial.sound };
   } catch { return defaultSave(); }
 }
 
