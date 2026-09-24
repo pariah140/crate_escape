@@ -140,19 +140,21 @@ function makeFish(color: string): { group: THREE.Group; tail: THREE.Group } {
   return { group: fish, tail };
 }
 
-function makeTurtle(): THREE.Group {
+function makeTurtle(): { group: THREE.Group; flippers: THREE.Mesh[] } {
   const turtle = new THREE.Group();
-  const shell = new THREE.Mesh(new THREE.IcosahedronGeometry(0.88, 0), mat('#68b879'));
-  shell.scale.set(0.9, 0.48, 1.15); shell.position.y = 0.36; shell.castShadow = true; turtle.add(shell);
-  const top = new THREE.Mesh(new THREE.IcosahedronGeometry(0.56, 0), mat('#3e956f'));
-  top.scale.set(0.88, 0.34, 1.1); top.position.y = 0.69; turtle.add(top);
-  const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.31, 0), mat('#8bd090'));
+  const shell = new THREE.Mesh(new THREE.IcosahedronGeometry(0.88, 0), mat('#327f78'));
+  shell.scale.set(0.9, 0.42, 1.15); shell.position.y = 0.36; turtle.add(shell);
+  const top = new THREE.Mesh(new THREE.IcosahedronGeometry(0.56, 0), mat('#236a70'));
+  top.scale.set(0.88, 0.3, 1.1); top.position.y = 0.61; turtle.add(top);
+  const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.31, 0), mat('#56a695'));
   head.position.set(0, 0.29, 0.95); turtle.add(head);
+  const flippers: THREE.Mesh[] = [];
   for (const side of [-1, 1]) {
-    const flipper = box(turtle, '#7cc987', side * 0.8, 0.14, 0.1, 0.6, 0.14, 0.3);
+    const flipper = box(turtle, '#4d9d8d', side * 0.8, 0.14, 0.1, 0.6, 0.14, 0.3);
     flipper.rotation.y = side * 0.35;
+    flippers.push(flipper);
   }
-  return turtle;
+  return { group: turtle, flippers };
 }
 
 function makeGull(): { group: THREE.Group; wings: THREE.Mesh[] } {
@@ -197,10 +199,12 @@ export class World {
   private readonly bowWash = new THREE.Group();
   private readonly impactRing: THREE.Mesh;
   private readonly splashDrops: Array<{ mesh: THREE.Mesh; vx: number; vy: number; vz: number }> = [];
-  private readonly wakes: THREE.Mesh[] = [];
+  private readonly wakes: Array<{ mesh: THREE.Mesh; age: number }> = [];
+  private wakeTimer = 0;
+  private nextWake = 0;
   private readonly waterMarks: THREE.Group[] = [];
   private readonly fishSchools: Array<{ group: THREE.Group; baseX: number; baseZ: number; phase: number; swimmers: Array<{ fish: THREE.Group; tail: THREE.Group; phase: number }> }> = [];
-  private readonly turtles: Array<{ group: THREE.Group; baseX: number; baseZ: number; phase: number }> = [];
+  private readonly turtles: Array<{ group: THREE.Group; flippers: THREE.Mesh[]; baseX: number; baseZ: number; phase: number }> = [];
   private readonly gulls: Array<{ group: THREE.Group; wings: THREE.Mesh[]; baseX: number; baseZ: number; phase: number }> = [];
   private heading = 0;
   private damageTime = 0;
@@ -233,24 +237,32 @@ export class World {
       vertexShader: `uniform float uTime; varying vec3 vWater;
         void main() {
           vec3 p = position;
-          p.z = sin(p.x * 0.42 + uTime * 1.1) * 0.08 + sin(p.y * 0.25 - uTime * 0.85) * 0.06;
+          p.z = sin(p.x * 0.42 + uTime * 1.1) * 0.08 + sin(p.y * 0.25 - uTime * 0.85) * 0.06
+            + sin(p.x * 0.9 + p.y * 0.47 + uTime * 1.55) * 0.035;
           vWater = (modelMatrix * vec4(position, 1.0)).xyz;
           gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
         }`,
       fragmentShader: `uniform float uTime; uniform vec3 uDeep; uniform vec3 uLight; uniform vec3 uFoam; varying vec3 vWater;
         void main() {
-          float broad = sin(vWater.x * 0.53 + vWater.z * 0.19 - uTime * 0.9);
-          float cross = sin(vWater.z * 0.42 - vWater.x * 0.24 + uTime * 1.05);
-          float chop = sin(vWater.z * 1.35 + vWater.x * 0.66 - uTime * 1.9);
-          float shade = clamp(0.48 + broad * 0.16 + cross * 0.11 + chop * 0.035, 0.0, 1.0);
-          float glint = smoothstep(0.79, 0.98, 0.5 + broad * 0.23 + cross * 0.24);
-          vec3 color = mix(uDeep, uLight, shade) + uFoam * glint * 0.055;
-          gl_FragColor = vec4(color, 0.7);
+          vec2 p = vWater.xz;
+          vec2 folded = p + vec2(sin(p.y * 0.21 + uTime * 0.45) * 1.3,
+            sin(p.x * 0.23 - uTime * 0.38) * 1.2);
+          float swell = sin(p.x * 0.29 + p.y * 0.18 - uTime * 0.8);
+          float crossing = sin(folded.y * 0.38 - folded.x * 0.22 + uTime * 1.15);
+          float small = sin(folded.x * 1.05 + folded.y * 0.72 - uTime * 2.0);
+          float shade = clamp(0.49 + swell * 0.16 + crossing * 0.13 + small * 0.045, 0.0, 1.0);
+          float crest = smoothstep(0.82, 0.98, crossing * 0.5 + swell * 0.4 + small * 0.1 + 0.52);
+          float ripple = sin(p.x * 1.9 - p.y * 0.85 + uTime * 2.6 + sin(p.y * 0.31 + uTime) * 0.6);
+          float ripples = smoothstep(0.82, 0.98, ripple) * (0.35 + 0.65 * smoothstep(0.0, 0.7, crossing));
+          vec3 color = mix(uDeep, uLight, shade);
+          color = mix(color, uFoam, crest * 0.13 + ripples * 0.12);
+          gl_FragColor = vec4(color, 0.82);
           #include <colorspace_fragment>
         }`,
     });
     this.ocean = new THREE.Mesh(new THREE.PlaneGeometry(130, 1150, 30, 170), water);
-    this.ocean.rotation.x = -Math.PI / 2; this.ocean.position.set(0, -0.04, 260); this.scene.add(this.ocean);
+    this.ocean.rotation.x = -Math.PI / 2; this.ocean.position.set(0, -0.04, 260);
+    this.ocean.renderOrder = -1; this.scene.add(this.ocean);
     this.scene.add(this.route); this.scene.add(this.boat);
     this.boatFoam = makeHullFoam(1.68, 2.55);
     this.scene.add(this.boatFoam);
@@ -276,9 +288,13 @@ export class World {
       drop.visible = false; this.scene.add(drop);
       this.splashDrops.push({ mesh: drop, vx: Math.cos(i * Math.PI / 5) * (2.6 + (i % 3)), vy: 2.7 + (i % 4) * 0.6, vz: Math.sin(i * Math.PI / 5) * (2.6 + (i % 3)) });
     }
-    for (let i = 0; i < 8; i++) {
-      const wake = new THREE.Mesh(new THREE.TorusGeometry(0.48 + i * 0.08, 0.045, 3, 9, Math.PI), new THREE.MeshBasicMaterial({ color: '#b6ede3', transparent: true, opacity: 0.55 - i * 0.04 }));
-      wake.rotation.x = -Math.PI / 2; wake.rotation.z = Math.PI; this.scene.add(wake); this.wakes.push(wake);
+    for (let i = 0; i < 24; i++) {
+      const wake = new THREE.Mesh(
+        new THREE.RingGeometry(0.86, 1, 28, 1, 0.1, Math.PI - 0.2),
+        new THREE.MeshBasicMaterial({ color: '#d5f8ed', side: THREE.DoubleSide, transparent: true, opacity: 0, depthWrite: false }),
+      );
+      wake.rotation.x = -Math.PI / 2; wake.visible = false; wake.renderOrder = 2; this.scene.add(wake);
+      this.wakes.push({ mesh: wake, age: 2 });
     }
     this.buildRoute();
     this.resize(); window.addEventListener('resize', () => this.resize());
@@ -358,8 +374,8 @@ export class World {
       this.route.add(school); this.fishSchools.push({ group: school, baseX, baseZ, phase: i * 1.47, swimmers });
     }
     for (let i = 0; i < 6; i++) {
-      const turtle = makeTurtle(); this.route.add(turtle);
-      this.turtles.push({ group: turtle, baseX: i % 2 ? -9 : 9, baseZ: 42 + i * 84, phase: i * 1.9 });
+      const turtle = makeTurtle(); this.route.add(turtle.group);
+      this.turtles.push({ ...turtle, baseX: i % 2 ? -9 : 9, baseZ: 42 + i * 84, phase: i * 1.9 });
     }
     for (let i = 0; i < 8; i++) {
       const gull = makeGull(); this.route.add(gull.group);
@@ -374,7 +390,7 @@ export class World {
     this.renderer.shadowMap.enabled = this.width >= 720;
     this.renderer.setSize(this.width, this.height, false);
     const aspect = this.width / this.height;
-    const span = this.width < 720 ? 38 : 43;
+    const span = this.width < 720 ? 54 : 52;
     this.camera.left = -span * aspect / 2; this.camera.right = span * aspect / 2;
     this.camera.top = span / 2; this.camera.bottom = -span / 2; this.camera.updateProjectionMatrix();
   }
@@ -382,7 +398,8 @@ export class World {
   private waterHeight(x: number, z: number): number {
     // Keep the hull and foam in phase with the ocean vertex shader.
     return -0.04 + Math.sin(x * 0.42 + this.elapsed * 1.1) * 0.08
-      + Math.sin((260 - z) * 0.25 - this.elapsed * 0.85) * 0.06;
+      + Math.sin((260 - z) * 0.25 - this.elapsed * 0.85) * 0.06
+      + Math.sin(x * 0.9 + (260 - z) * 0.47 + this.elapsed * 1.55) * 0.035;
   }
 
   update(dt: number, running: boolean, x: number, z: number, heat: number, boatSpeed: number, vx = 0, vz = 0, target: { x: number; z: number } | null = null): void {
@@ -416,14 +433,31 @@ export class World {
       const pulse = 1 + Math.sin(this.elapsed * 6) * 0.1;
       this.targetMarker.scale.setScalar(pulse);
     }
-    for (let i = 0; i < this.wakes.length; i++) {
-      const wake = this.wakes[i];
-      const distance = 2.9 + i * 0.75;
-      const wakeX = x - Math.sin(this.heading) * distance;
-      const wakeZ = z - Math.cos(this.heading) * distance;
-      wake.position.set(wakeX, this.waterHeight(wakeX, wakeZ) + 0.065, wakeZ);
-      wake.rotation.z = Math.PI - this.heading;
-      wake.visible = running && boatSpeed > 0.8;
+    if (running && boatSpeed > 0.8) {
+      this.wakeTimer += dt;
+      const interval = Math.max(0.11, 0.24 - boatSpeed * 0.012);
+      if (this.wakeTimer >= interval) {
+        this.wakeTimer = 0;
+        const ripple = this.wakes[this.nextWake];
+        this.nextWake = (this.nextWake + 1) % this.wakes.length;
+        const wakeX = x - Math.sin(this.heading) * 2.25;
+        const wakeZ = z - Math.cos(this.heading) * 2.25;
+        ripple.mesh.position.set(wakeX, this.waterHeight(wakeX, wakeZ) + 0.075, wakeZ);
+        ripple.mesh.rotation.order = 'YXZ';
+        ripple.mesh.rotation.set(-Math.PI / 2, -this.heading, 0);
+        ripple.age = 0;
+        ripple.mesh.visible = true;
+      }
+    } else this.wakeTimer = 0;
+    for (const ripple of this.wakes) {
+      if (!ripple.mesh.visible) continue;
+      ripple.age += dt;
+      const life = 1.8;
+      const progress = Math.min(1, ripple.age / life);
+      ripple.mesh.scale.set(0.85 + progress * 2.25, 0.85 + progress * 1.35, 1);
+      ripple.mesh.position.y = this.waterHeight(ripple.mesh.position.x, ripple.mesh.position.z) + 0.075;
+      (ripple.mesh.material as THREE.MeshBasicMaterial).opacity = (1 - progress) ** 1.5 * 0.72;
+      if (progress >= 1) ripple.mesh.visible = false;
     }
     this.waterMarks.forEach((mark, i) => {
       mark.position.z += dt * (0.3 + (i % 4) * 0.15);
@@ -442,9 +476,13 @@ export class World {
         fish.rotation.y = Math.sin(this.elapsed * 9 + fishPhase) * 0.06;
       });
     });
-    this.turtles.forEach(({ group, baseX, baseZ, phase }) => {
-      group.position.set(baseX + Math.sin(this.elapsed * 0.35 + phase) * 1.1, Math.sin(this.elapsed * 1.1 + phase) * 0.05, baseZ + Math.cos(this.elapsed * 0.3 + phase) * 2.3);
-      group.rotation.y = Math.sin(this.elapsed * 0.35 + phase) * 0.45;
+    this.turtles.forEach(({ group, flippers, baseX, baseZ, phase }) => {
+      const swimTime = this.elapsed * 0.4 + phase;
+      group.position.set(baseX + Math.sin(swimTime) * 1.3, -1.12 + Math.sin(this.elapsed * 1.1 + phase) * 0.07, baseZ + Math.cos(swimTime) * 2.5);
+      group.rotation.y = Math.atan2(Math.cos(swimTime) * 1.3, -Math.sin(swimTime) * 2.5);
+      flippers.forEach((flipper, side) => {
+        flipper.rotation.z = (side ? -1 : 1) * (0.14 + Math.sin(this.elapsed * 4 + phase) * 0.26);
+      });
     });
     this.gulls.forEach(({ group, wings, baseX, baseZ, phase }) => {
       group.position.set(baseX + Math.sin(this.elapsed * 0.42 + phase) * 4.2, 4.8 + Math.sin(this.elapsed * 1.7 + phase) * 0.5, baseZ + Math.cos(this.elapsed * 0.42 + phase) * 5);
@@ -487,7 +525,7 @@ export class World {
       (patrol.light.material as THREE.MeshBasicMaterial).opacity = 0.12 + Math.sin(this.elapsed * 2 + i) * 0.03;
     });
     const narrow = this.width < 720;
-    const targetZ = running ? z + (narrow ? 5 : 10) : -7;
+    const targetZ = running ? z + (narrow ? 8 : 14) : -7;
     const targetX = running ? x * 0.5 : 0;
     const factor = Math.min(1, dt * 2.5);
     this.camera.position.lerp(new THREE.Vector3(targetX + (narrow ? 6 : 16), 31, targetZ - (narrow ? 25 : 28)), factor);

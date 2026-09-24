@@ -2,7 +2,7 @@ import './style.css';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Share } from '@capacitor/share';
 import { World } from './world';
-import { advanceMotion } from './piloting';
+import { advanceMotion, clampSailingPoint } from './piloting';
 import {
   BOATS, PORTS, SHAPE_NAMES, canFitAll, canPlace, jobById, jobsForPort,
   loadSave, occupiedCells, persist, rotatedCells,
@@ -262,7 +262,7 @@ function beginRun(): void {
 
 function updateHud(): void {
   if (!run) return;
-  const progress = Math.min(100, Math.round(run.z / 520 * 100));
+  const progress = Math.max(0, Math.min(100, Math.round(run.z / 520 * 100)));
   const hull = Math.max(0, Math.round(run.hull / run.maxHull * 100));
   const heat = Math.round(run.heat);
   const set = (id: string, value: string) => { const el = document.getElementById(id); if (el) el.textContent = value; };
@@ -302,17 +302,17 @@ function showImpact(label: string): void {
 
 function steeringPoint(clientX: number, clientY: number): { x: number; z: number } {
   const point = world.screenToWater(clientX, clientY);
-  return { x: Math.max(-6.8, Math.min(6.8, point.x)), z: Math.max(0, Math.min(520, point.z)) };
+  return clampSailingPoint(point);
 }
 
 function dragPoint(): { x: number; z: number } | null {
   if (!run?.holding || !run.pointerMoved) return null;
   const start = world.screenToWater(run.pointerStartX, run.pointerStartY);
   const current = world.screenToWater(run.pointerX, run.pointerY);
-  return {
-    x: Math.max(-6.8, Math.min(6.8, run.dragOriginX + current.x - start.x)),
-    z: Math.max(0, Math.min(520, run.dragOriginZ + current.z - start.z)),
-  };
+  return clampSailingPoint({
+    x: run.dragOriginX + current.x - start.x,
+    z: run.dragOriginZ + current.z - start.z,
+  });
 }
 
 function updateRun(dt: number): void {
@@ -346,7 +346,7 @@ function updateRun(dt: number): void {
   if (spotted && run.heat > 50 && Math.floor(run.elapsed * 2) % 5 === 0) beep(340, 0.08, 'square');
   if (run.contact >= 2) { run.ending = true; showImpact('CAUGHT!'); window.setTimeout(() => endRun(false, 'caught'), 650); return; }
   for (const hazard of world.hazards) {
-    if (Math.abs(run.z - hazard.z) < hazard.radius + 0.9 && Math.abs(run.x - hazard.x) < hazard.radius + 0.9 && run.damageCooldown === 0) {
+    if (Math.hypot(run.x - hazard.x, run.z - hazard.z) < hazard.radius + 0.85 && run.damageCooldown === 0) {
       const damage = hazard.kind === 'rock' ? 24 : 12;
       run.hull = Math.max(0, run.hull - damage);
       run.collisions++; run.damageCooldown = 1.25;
