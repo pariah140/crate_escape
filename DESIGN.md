@@ -80,3 +80,7 @@ The marketplace is a full paper catalog ordered by price, with every boat's own 
 ## Night voyages and dockyard inspection
 
 The night light switch changes both the visible area around the boat and patrol sight and heat gain. A lit boat is easier to pilot and easier to spot; lights off conceal hazards and reduce detection. The shipyard is a poured concrete service dock with marked bays, workshops, a gantry crane, containers, drums and moored boats. Choosing a boat from the scene or fleet list moves the camera in and shows that boat's condition, refit levels, repair cost and active status. The small Patchwork Sailboat is always owned and costs nothing to repair. It has at least one deliverable job in every harbor, giving the player a way to earn repair money after an expensive accident.
+
+## Boat silhouettes
+
+Hull profiles use shaped chines and gunwales instead of a flat slab. Deck equipment reinforces each boat's role: open benches and oars on the dinghy, a windscreen and twin motors on the speedboat, fishing gear on the trawler, a covered cabin on the cruiser, stacked containers on the freighter, two separate hulls on the catamaran, and a cottage roof on the houseboat. The backup sailboat uses an open cockpit, mast, boom, rigging, and angled, gently billowed triangular sails with a warm patch of color. Idle shipyard models show the boat without delivery crates so its shape is legible.

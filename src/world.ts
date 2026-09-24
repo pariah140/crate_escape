@@ -25,83 +25,182 @@ function cylinder(parent: THREE.Object3D, color: string, x: number, y: number, z
   mesh.position.set(x, y, z); mesh.castShadow = true; parent.add(mesh); return mesh;
 }
 
+function tube(parent: THREE.Object3D, color: string, points: THREE.Vector3[], radius = .045): THREE.Mesh {
+  const mesh = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), Math.max(8, points.length * 5), radius, 5, false), mat(color));
+  mesh.castShadow = true; parent.add(mesh); return mesh;
+}
+
+function shapedHull(parent: THREE.Object3D, color: string, half: number, front: number, back: number, kind: 'pointed' | 'round' | 'square' = 'round', offsetX = 0): void {
+  const bow = kind === 'square' ? .72 : kind === 'pointed' ? .09 : .38;
+  const stern = kind === 'square' ? .9 : .56;
+  const edge: Array<[number, number]> = [
+    [0, front], [-half * bow, front - .16], [-half * .88, front - (kind === 'pointed' ? .9 : .48)],
+    [-half, front - (kind === 'pointed' ? 1.45 : .85)], [-half, back + .48], [-half * stern, back],
+    [half * stern, back], [half, back + .48], [half, front - (kind === 'pointed' ? 1.45 : .85)],
+    [half * .88, front - (kind === 'pointed' ? .9 : .48)], [half * bow, front - .16],
+  ];
+  const shape = new THREE.Shape();
+  edge.forEach(([x, z], index) => index ? shape.lineTo(x + offsetX, -z) : shape.moveTo(x + offsetX, -z));
+  shape.closePath();
+  const top = kind === 'square' ? 1.72 : 1.56;
+  const deck = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshStandardMaterial({ color: '#e8d9b7', roughness: .93, side: THREE.DoubleSide, flatShading: true }));
+  deck.rotation.x = -Math.PI / 2; deck.position.y = top + .035; deck.receiveShadow = true; parent.add(deck);
+  const ringGeometry = (upper: boolean): THREE.BufferGeometry => {
+    const positions: number[] = []; const indices: number[] = [];
+    for (const [x, z] of edge) {
+      const inset = upper ? .83 : .83;
+      positions.push(x + offsetX, upper ? top : .96, z, x * inset + offsetX, upper ? .96 : .47, z * (upper ? .94 : .85));
+    }
+    for (let i = 0; i < edge.length; i++) {
+      const next = (i + 1) % edge.length;
+      indices.push(i * 2, next * 2, i * 2 + 1, next * 2, next * 2 + 1, i * 2 + 1);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3)); geometry.setIndex(indices); geometry.computeVertexNormals(); return geometry;
+  };
+  const upper = new THREE.Mesh(ringGeometry(true), new THREE.MeshStandardMaterial({ color, roughness: .74, flatShading: true, side: THREE.DoubleSide }));
+  const lower = new THREE.Mesh(ringGeometry(false), new THREE.MeshStandardMaterial({ color: new THREE.Color(color).multiplyScalar(.65), roughness: .8, flatShading: true, side: THREE.DoubleSide }));
+  upper.castShadow = true; lower.castShadow = true; parent.add(upper, lower);
+  const rail = edge.map(([x, z]) => new THREE.Vector3(x + offsetX, top + .075, z)); rail.push(rail[0].clone());
+  tube(parent, '#fff3d2', rail, .085);
+  for (const side of [-1, 1]) for (const z of [back + .85, front - 1.3]) {
+    const port = new THREE.Mesh(new THREE.CircleGeometry(.115, 10), new THREE.MeshStandardMaterial({ color: '#b6e4db', side: THREE.DoubleSide }));
+    port.rotation.y = side * Math.PI / 2; port.position.set(offsetX + side * (half * .94), 1.18, z); parent.add(port);
+  }
+}
+
+function fabricSail(parent: THREE.Object3D, color: string, name: string, corners: [THREE.Vector3, THREE.Vector3, THREE.Vector3], billow = .24): void {
+  const [head, tack, clew] = corners;
+  const center = new THREE.Vector3().add(head).add(tack).add(clew).multiplyScalar(1 / 3); center.x += billow;
+  const vertices = [head, tack, center, tack, clew, center, clew, head, center].flatMap(point => [point.x, point.y, point.z]);
+  const geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3)); geometry.computeVertexNormals();
+  const cloth = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: .35, side: THREE.DoubleSide, roughness: 1, flatShading: true }));
+  cloth.name = name; cloth.castShadow = true; parent.add(cloth);
+  tube(parent, '#cfb28a', [head, tack], .025); tube(parent, '#cfb28a', [head, clew], .025);
+}
+
+function disposeModels(group: THREE.Object3D): void {
+  group.traverse(object => {
+    if (!(object instanceof THREE.Mesh)) return;
+    object.geometry.dispose();
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of materials) material.dispose();
+  });
+}
+
 function makeBoat(color: string, style: BoatStyle | 'patrol' = 'dinghy'): THREE.Group {
   const craft = new THREE.Group();
   const broad = ['trawler', 'freighter', 'catamaran', 'houseboat', 'barge'].includes(style);
   const long = ['cruiser', 'freighter', 'clipper', 'barge'].includes(style);
-  const half = style === 'skiff' ? 0.92 : style === 'dinghy' || style === 'patrol' ? 1.28 : style === 'speedboat' ? 1.12 : style === 'barge' ? 1.92 : broad ? 1.65 : 1.4;
+  const half = style === 'skiff' ? 0.92 : style === 'dinghy' || style === 'patrol' || style === 'sailboat' ? 1.28 : style === 'speedboat' ? 1.12 : style === 'barge' ? 1.92 : broad ? 1.65 : 1.4;
   const front = style === 'speedboat' || style === 'skiff' ? 2.9 : long ? 3.15 : 2.35;
   const back = long ? -2.9 : -2.15;
-  const outline = new THREE.Shape();
-  outline.moveTo(0, front); outline.lineTo(-half * (style === 'speedboat' ? 0.94 : 0.72), front - 0.45);
-  outline.lineTo(-half, front - (style === 'speedboat' ? 1.7 : 0.85));
-  outline.lineTo(-half, back + 0.38); outline.quadraticCurveTo(-half * 0.86, back, 0, back);
-  outline.quadraticCurveTo(half * 0.86, back, half, back + 0.38);
-  outline.lineTo(half, front - (style === 'speedboat' ? 1.7 : 0.85));
-  outline.lineTo(half * (style === 'speedboat' ? 0.94 : 0.72), front - 0.45); outline.closePath();
-  const hull = new THREE.Mesh(new THREE.ExtrudeGeometry(outline, { depth: broad ? 0.92 : 0.72, bevelEnabled: true, bevelThickness: 0.12, bevelSize: 0.1, bevelSegments: 2, curveSegments: 5 }), mat(color));
-  hull.rotation.x = -Math.PI / 2; hull.position.y = 0.83; hull.castShadow = true; craft.add(hull);
-  const deck = new THREE.Mesh(new THREE.ShapeGeometry(outline), mat(style === 'freighter' ? '#d9e1c4' : '#fff5d6'));
-  deck.rotation.x = -Math.PI / 2; deck.position.y = broad ? 1.82 : 1.61; deck.scale.set(0.83, 0.83, 1); craft.add(deck);
-  const railPoints = [new THREE.Vector3(0, broad ? 1.9 : 1.68, front - 0.22), new THREE.Vector3(-half * .91, broad ? 1.9 : 1.68, front - 1.08), new THREE.Vector3(-half * .91, broad ? 1.9 : 1.68, back + .43), new THREE.Vector3(0, broad ? 1.9 : 1.68, back + .19), new THREE.Vector3(half * .91, broad ? 1.9 : 1.68, back + .43), new THREE.Vector3(half * .91, broad ? 1.9 : 1.68, front - 1.08)];
-  craft.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(railPoints, true), 44, .06, 5, true), mat(style === 'patrol' ? '#dceef0' : '#ffe9ac')));
+  if (style === 'catamaran') {
+    shapedHull(craft, color, .55, 2.65, -2.35, 'pointed', -1.13);
+    shapedHull(craft, color, .55, 2.65, -2.35, 'pointed', 1.13);
+    box(craft, '#f3e8cc', 0, 1.61, -.05, 2.6, .18, 3.55);
+  } else shapedHull(craft, color, half, front, back, style === 'speedboat' || style === 'skiff' || style === 'clipper' || style === 'sailboat' ? 'pointed' : style === 'freighter' || style === 'barge' || style === 'houseboat' ? 'square' : 'round');
+  const deckY = style === 'barge' || style === 'freighter' || style === 'houseboat' ? 1.74 : 1.61;
+  for (const side of [-1, 1]) {
+    cylinder(craft, '#fff1d0', side * half * .7, deckY + .16, back + .53, .1, .28);
+    const fender = cylinder(craft, style === 'patrol' ? '#d8edf0' : '#fff2db', side * (half + .06), 1.1, -.35, .16, .48, 8); fender.rotation.z = side * .17;
+  }
   const cabinZ = style === 'freighter' || style === 'barge' ? back + 0.85 : style === 'trawler' || style === 'houseboat' ? 0.15 : style === 'speedboat' ? -0.6 : -0.34;
   const cabinY = broad ? 2.08 : 1.95;
   const cabinW = style === 'freighter' || style === 'barge' ? 2.35 : style === 'trawler' || style === 'houseboat' ? 1.8 : style === 'cruiser' ? 1.9 : style === 'skiff' ? .75 : 1.18;
   const cabinD = style === 'houseboat' ? 2.2 : style === 'cruiser' ? 1.95 : style === 'freighter' || style === 'barge' ? 1.35 : style === 'trawler' ? 1.35 : 1.08;
-  box(craft, '#fff2d9', 0, cabinY, cabinZ, cabinW, style === 'freighter' ? 0.95 : 0.64, cabinD);
-  box(craft, style === 'patrol' ? '#496e88' : style === 'cruiser' ? '#f9c8ae' : style === 'freighter' ? '#7f9db2' : '#e88470', 0, cabinY + (style === 'freighter' ? .57 : .39), cabinZ, cabinW + .18, .16, cabinD + .2);
-  box(craft, '#83cbd0', 0, cabinY + .08, cabinZ + cabinD / 2 + .035, cabinW * .68, .28, .06);
-  for (const side of [-1, 1]) {
-    box(craft, '#8bd1d1', side * (cabinW / 2 + .025), cabinY + .06, cabinZ, .06, .25, cabinD * .45);
-    for (const portholeZ of [back + .68, front - 1.15]) {
-      const port = new THREE.Mesh(new THREE.CircleGeometry(.13, 9), new THREE.MeshBasicMaterial({ color: '#a5e1dc', side: THREE.DoubleSide }));
-      port.rotation.y = Math.PI / 2; port.position.set(side * (half + .02), 1.26, portholeZ); craft.add(port);
-    }
+  if (!['dinghy', 'skiff', 'sailboat', 'catamaran'].includes(style)) {
+    box(craft, '#fff2d9', 0, cabinY, cabinZ, cabinW, style === 'freighter' ? 0.95 : 0.64, cabinD);
+    box(craft, style === 'patrol' ? '#496e88' : style === 'cruiser' ? '#f9c8ae' : style === 'freighter' ? '#7f9db2' : '#e88470', 0, cabinY + (style === 'freighter' ? .57 : .39), cabinZ, cabinW + .18, .16, cabinD + .2);
+    box(craft, '#83cbd0', 0, cabinY + .08, cabinZ + cabinD / 2 + .035, cabinW * .68, .28, .06);
+    for (const side of [-1, 1]) box(craft, '#8bd1d1', side * (cabinW / 2 + .025), cabinY + .06, cabinZ, .06, .25, cabinD * .45);
   }
-  if (style === 'speedboat') {
-    for (const side of [-1, 1]) box(craft, '#415c72', side * .46, 1.16, back - .13, .3, .35, .46);
-    box(craft, '#e8f4ec', 0, 1.65, 1.38, 1.23, .12, .14).rotation.x = -.28;
+  if (style === 'dinghy') {
+    box(craft, '#9a7655', 0, 1.68, -.85, 1.8, .12, .34);
+    box(craft, '#9a7655', 0, 1.68, .7, 1.55, .12, .34);
+    box(craft, '#436778', 0, 1.74, back + .22, .75, .23, .4);
+    for (const side of [-1, 1]) {
+      const oar = box(craft, '#c39459', side * 1.1, 1.77, -.1, .07, .07, 2.15); oar.rotation.y = side * .52;
+      box(craft, '#ebc889', side * 1.65, 1.77, 1.0, .26, .06, .72).rotation.y = side * .52;
+    }
+    cylinder(craft, '#f7d370', -.55, 1.83, 1.68, .16, .15);
+  } else if (style === 'speedboat') {
+    for (const side of [-1, 1]) box(craft, '#415c72', side * .44, 1.38, back - .08, .3, .46, .5);
+    const windscreen = box(craft, '#9ad7dc', 0, 2.1, .52, 1.42, .5, .09); windscreen.rotation.x = -.4;
+    box(craft, '#fff6d3', 0, 1.68, 1.75, .23, .04, 1.55);
+    for (const side of [-1, 1]) box(craft, '#4b7482', side * .43, 1.73, -.85, .48, .19, .58);
   } else if (style === 'trawler') {
-    cylinder(craft, '#8e7253', 0, 3.04, cabinZ, .08, 1.6);
-    cone(craft, '#fff0c8', .44, 3.42, cabinZ, .42, .7, 3).rotation.z = -.28;
-    for (const side of [-1, 1]) box(craft, '#d9ab6b', side * 1.39, 1.92, .45, .2, .15, 1.55);
+    cylinder(craft, '#8e7253', 0, 3.2, cabinZ, .075, 1.25);
+    for (const side of [-1, 1]) {
+      box(craft, '#b6895a', side * 1.23, 1.88, -.35, .14, .18, 2.0);
+      tube(craft, '#8c755e', [new THREE.Vector3(0,3.67,cabinZ),new THREE.Vector3(side*1.38,1.9,-1.25)], .025);
+      cylinder(craft, '#e2b86d', side * 1.25, 1.79, -1.1, .38, .38);
+    }
+    box(craft, '#f4c87e', 0, 1.8, 1.52, 1.28, .13, .85);
+    cylinder(craft, '#f0dfbd', .43, 3.05, cabinZ-.2, .12, .5);
   } else if (style === 'cruiser') {
-    box(craft, '#fff7db', 0, 2.54, cabinZ - .35, 1.35, .13, .8);
-    for (const side of [-1, 1]) box(craft, '#f9deb2', side * 1.1, 1.76, 1.6, .23, .16, 1.4);
+    box(craft, '#fff7db', 0, 2.55, cabinZ - .35, 1.5, .15, 1.1);
+    for (const side of [-1, 1]) {
+      box(craft, '#f9deb2', side * 1.07, 1.76, 1.72, .22, .15, 1.4);
+      tube(craft, '#f9e8bc', [new THREE.Vector3(side*1.24,1.7,-2.0),new THREE.Vector3(side*1.24,2.18,-2.0),new THREE.Vector3(side*1.24,2.18,1.8)], .025);
+    }
+    box(craft, '#f1bc95', 0, 2.72, -1.3, 1.0, .08, .6);
+    cylinder(craft, '#ffdc88', 0, 2.86, -.4, .11, .34);
   } else if (style === 'freighter') {
     for (const side of [-1, 1]) for (let i = 0; i < 2; i++) box(craft, ['#ecab76', '#8dcaaf', '#e7cf82', '#a8b1de'][(side + 1) + i], side * .72, 2.05 + i * .35, 1.3, 1.25, .33, 1.23);
     cylinder(craft, '#eef3dc', 0, 3.17, cabinZ, .085, 1.1);
+    tube(craft, '#566e78', [new THREE.Vector3(-1.25,1.83,2.45),new THREE.Vector3(-1.25,2.35,2.45),new THREE.Vector3(1.25,2.35,2.45)], .04);
+    cylinder(craft, '#f3c77b', 1.3, 2.08, 2.27, .18, .55);
+    box(craft, '#d3ac70', 0, 1.81, -.65, 2.6, .12, .38);
   } else if (style === 'skiff') {
-    box(craft, '#4c7389', 0, 1.13, back - .12, .6, .36, .32);
-    for (const side of [-1, 1]) box(craft, '#fff5d2', side * .55, 1.7, .72, .1, .1, 1.8);
-  } else if (style === 'catamaran') {
+    box(craft, '#4c7389', 0, 1.54, back - .12, .55, .46, .38);
+    box(craft, '#f6d6a5', 0, 1.72, -.64, 1.42, .13, .3);
+    box(craft, '#f6d6a5', 0, 1.72, 1.05, 1.14, .13, .25);
     for (const side of [-1, 1]) {
-      const float = box(craft, '#f8e9ce', side * 1.36, .66, .15, .36, .42, 4.9);
-      float.rotation.y = side * .035;
+      box(craft, '#fff5d2', side * .65, 1.67, .2, .12, .11, 2.0);
+      cylinder(craft, '#e4b76d', side * .58, 1.81, -1.35, .23, .18);
     }
-    box(craft, '#d3f0e6', 0, 2.52, cabinZ, 2.5, .13, 1.45);
-    for (const side of [-1, 1]) box(craft, '#f4ba7d', side * .94, 1.93, 1.12, .38, .22, 1.2);
+  } else if (style === 'catamaran') {
+    box(craft, '#fff3d9', 0, 1.92, -.7, 1.8, .55, 1.3);
+    box(craft, '#f0b878', 0, 2.27, -.7, 2.0, .16, 1.52);
+    box(craft, '#a6dce0', 0, 1.99, -.02, 1.26, .27, .08);
+    for (const side of [-1, 1]) {
+      box(craft, '#f4ba7d', side * 1.12, 1.86, 1.25, .3, .17, 1.4);
+      tube(craft, '#fff0ca', [new THREE.Vector3(side*1.45,1.7,-1.5),new THREE.Vector3(side*1.45,2.1,-1.5),new THREE.Vector3(side*1.45,2.1,1.55)], .025);
+    }
   } else if (style === 'houseboat') {
     const roof = box(craft, '#e9846f', 0, 2.57, cabinZ, 2.35, .19, 2.75);
     roof.rotation.z = -.07;
     cylinder(craft, '#b57859', .65, 2.88, cabinZ - .55, .13, .68);
-    for (const side of [-1, 1]) box(craft, '#a4d6ae', side * .95, 1.85, 1.22, .27, .3, .55);
+    for (const side of [-1, 1]) {
+      box(craft, '#a4d6ae', side * .95, 1.85, 1.22, .27, .3, .55);
+      box(craft, '#a5cbd1', side * 1.18, 2.12, cabinZ, .08, .42, .67);
+    }
+    box(craft, '#9e7656', 0, 2.01, cabinZ + 1.13, .44, .63, .08);
+    cylinder(craft, '#d6ac73', -1.0, 1.85, 1.72, .25, .38);
+    cone(craft, '#6cb885', -1.0, 2.16, 1.72, .31, .43, 6);
   } else if (style === 'clipper') {
-    cylinder(craft, '#aa805b', 0, 3.34, -.65, .09, 2.7);
-    const sail = cone(craft, '#fff2d9', .47, 3.15, -.65, .86, 1.72, 3);
-    sail.rotation.z = -.35;
+    for (const z of [-1.4,1.0]) cylinder(craft, '#aa805b', 0, 3.28, z, .075, 3.2);
+    fabricSail(craft, '#fff0d2', 'clipper-main', [new THREE.Vector3(0,4.84,-1.4),new THREE.Vector3(0,2.1,-1.4),new THREE.Vector3(.12,2.15,-2.85)], .17);
+    fabricSail(craft, '#f6dba4', 'clipper-fore', [new THREE.Vector3(0,4.83,1),new THREE.Vector3(0,2.1,1),new THREE.Vector3(-.1,2.08,2.62)], -.16);
     box(craft, '#e6c28c', 0, 1.71, 1.67, 1.05, .12, 1.5);
   } else if (style === 'barge') {
     for (const side of [-1, 1]) for (let i = 0; i < 3; i++) box(craft, ['#91bea7', '#e8b785', '#a5a8d1'][i], side * .83, 2.06, -.2 + i * .92, 1.37, .55, .79);
     box(craft, '#6b895d', 0, 2.79, cabinZ, 2.44, .14, 1.58);
+    for (const side of [-1, 1]) for (const z of [-1.8, 1.5]) cylinder(craft, '#526a6e', side * 1.94, 1.12, z, .27, .2);
+    box(craft, '#eec67a', 0, 1.79, 2.3, 2.0, .14, .36);
   } else if (style === 'sailboat') {
-    cylinder(craft, '#986d4f', 0, 3.15, .18, .075, 3.1);
-    const mainsail = cone(craft, '#fff4cd', .47, 3.56, .1, 1.02, 2.35, 3);
-    mainsail.rotation.z = -.32;
-    const foresail = cone(craft, '#f3d79d', -.45, 2.92, 1.22, .5, 1.2, 3);
-    foresail.rotation.z = .3;
-    box(craft, '#f0bb79', 0, 1.74, 1.52, .75, .1, .86);
+    box(craft, '#4b7280', 0, 1.58, -1.12, 1.08, .09, 1.05);
+    box(craft, '#e8be86', 0, 1.68, -1.53, .92, .11, .22);
+    for (const side of [-1, 1]) box(craft, '#e8be86', side * .52, 1.69, -1.06, .19, .12, .85);
+    cylinder(craft, '#9a714d', 0, 3.47, .22, .074, 3.86);
+    const rig = new THREE.Group(); rig.rotation.y = -.55; rig.position.z = .2; craft.add(rig);
+    box(rig, '#aa8053', 0, 2.03, -.96, .075, .075, 1.94);
+    fabricSail(rig, '#fff6de', 'sailboat-main', [new THREE.Vector3(0,5.35,0),new THREE.Vector3(0,2.1,0),new THREE.Vector3(.03,2.1,-1.99)], .42);
+    fabricSail(rig, '#eaa777', 'sailboat-patch', [new THREE.Vector3(.015,3.08,-.04),new THREE.Vector3(.02,2.12,-.03),new THREE.Vector3(.05,2.12,-1.85)], .46);
+    fabricSail(craft, '#f9d9a0', 'sailboat-jib', [new THREE.Vector3(.02,4.63,.27),new THREE.Vector3(.01,1.92,2.14),new THREE.Vector3(.02,2.1,.74)], -.24);
+    tube(craft, '#faf0d7', [new THREE.Vector3(0,5.35,.2),new THREE.Vector3(0,1.87,2.17)], .025);
+    box(craft, '#efd3a0', 0, 1.73, 1.82, .6, .07, .33);
   } else {
     cylinder(craft, '#f5f3d9', 0, 1.8, 1.38, .15, .22);
     cone(craft, '#ffce5c', 0, 2.1, 1.38, .25, .35, 5);
@@ -451,6 +550,7 @@ export class World {
 
   setBoat(craft: BoatDefinition): void {
     this.scene.remove(this.boat);
+    disposeModels(this.boat);
     this.boat = makeBoat(craft.color, craft.style);
     const lamp = new THREE.SpotLight('#ffe5a6', 25, 32, .55, .68, 1.3);
     lamp.position.set(0, 2.9, 1.7);
@@ -494,12 +594,7 @@ export class World {
   }
 
   showShipyard(owned: number[], active: number): void {
-    this.yard.traverse(object => {
-      if (!(object instanceof THREE.Mesh)) return;
-      object.geometry.dispose();
-      const materials = Array.isArray(object.material) ? object.material : [object.material];
-      for (const material of materials) material.dispose();
-    });
+    disposeModels(this.yard);
     this.inYard = true; this.yardCount = owned.length; this.yard.clear(); this.yardBerths.clear(); this.yardBoats.clear(); this.yardFocused = null; this.yard.visible = true; this.route.visible = false;
     this.boat.visible = false; this.boatFoam.visible = false; this.bowWash.visible = false;
     // Poured concrete apron, marked service bays, workshops, gantry and stored freight.
@@ -543,7 +638,7 @@ export class World {
       const columns = Math.min(owned.length - row * 5, 5);
       const x = (column - (columns - 1) / 2) * 11;
       const z = -4 + row * 11;
-      const model = makeBoat(def.color, def.style); model.position.set(x, -.35, z); model.rotation.y = -.15; model.userData.boatIndex = index; this.yard.add(model);
+      const model = makeBoat(def.color, def.style); model.position.set(x, -.35, z); model.rotation.y = -.15; model.userData.boatIndex = index; model.getObjectByName('deck-cargo')!.visible = false; this.yard.add(model);
       this.yardBoats.set(index, model); this.yardBerths.set(index, new THREE.Vector3(x, 0, z));
       const foam = makeHullFoam(index >= 3 ? 2.4 : 1.8, index >= 3 ? 3.3 : 2.5); foam.position.set(x, .05, z); this.yard.add(foam);
       // A floating pontoon and repair gantry beside every berth.
