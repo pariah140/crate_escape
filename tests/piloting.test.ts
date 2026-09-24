@@ -41,3 +41,13 @@ test('large boats turn and stop more slowly than the dinghy', async () => {
   }
   assert.ok(Math.hypot(heavy.vx, heavy.vz) > Math.hypot(nimble.vx, nimble.vz));
 });
+
+test('a fast boat can cross a listening patrol while its engine is cut', async () => {
+  const { BOATS } = await import('../src/model');
+  let boat: Motion = { x: 0, z: -18, vx: 0, vz: 9 };
+  for (let i = 0; i < 5 * 60; i++) {
+    boat = advanceMotion(boat, null, { x: 0, z: 0 }, 9.2, 1 / 60, { ...BOATS[0], coast: .16 });
+  }
+  assert.ok(boat.z > 12);
+  assert.ok(boat.vz > 0);
+});

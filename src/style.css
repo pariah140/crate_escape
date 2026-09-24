@@ -157,6 +157,44 @@ button:active:not(:disabled) { transform: translateY(2px); }
 .pack-footer span { text-align: right; }
 
 .run-overlay { position: absolute; inset: 0; color: var(--paper); pointer-events: none !important; }
+.level-strip { margin: 10px 0 0; padding: 10px 12px; border: 2px solid #d0b998; border-radius: 12px; background: #fff7e7; display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; color: #315a61; }
+.level-strip span, .level-strip strong { font: 900 11px ui-monospace, monospace; letter-spacing: .07em; }
+.level-strip strong { color: #9d6349; }
+.level-strip small { grid-column: 1 / -1; font-size: 10px; font-weight: 750; }
+.voyage-tag { position: absolute; z-index: 4; top: 82px; left: 25px; padding: 4px 9px; border-radius: 7px; background: rgba(5,65,78,.78); font: 900 10px ui-monospace, monospace; letter-spacing: .08em; }
+.weather-layer { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+.weather-layer.night { background: rgba(8,24,59,.38); box-shadow: inset 0 0 180px 55px rgba(5,16,44,.52); }
+.weather-layer.fog { background: linear-gradient(115deg, rgba(226,246,231,.18), rgba(231,250,245,.43), rgba(226,246,231,.15)); animation: fog-breathe 7s ease-in-out infinite alternate; }
+.weather-layer.rain, .weather-layer.storm { background-image: repeating-linear-gradient(108deg, transparent 0 17px, rgba(226,249,249,.45) 18px 19px, transparent 20px 37px); background-size: 210px 280px; animation: rain-fall .65s linear infinite; opacity: .58; }
+.weather-layer.storm { opacity: .8; background-color: rgba(11,31,60,.18); animation-duration: .38s; }
+.weather-layer.wind::after { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(162deg, transparent 0 80px, rgba(242,255,242,.11) 81px 83px, transparent 84px 145px); animation: wind-drift 5s linear infinite; }
+@keyframes rain-fall { to { background-position: -90px 280px; } }
+@keyframes fog-breathe { to { opacity: .55; transform: translateX(2%); } }
+@keyframes wind-drift { to { transform: translateX(12%); } }
+.port-compass { position: absolute; z-index: 4; left: 23px; bottom: max(30px, env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 8px; padding: 7px 12px 7px 7px; border: 2px solid #ffefd0; border-radius: 34px; background: rgba(5,62,78,.94); box-shadow: 0 5px 0 rgba(5,47,58,.72); }
+.compass-face { position: relative; width: 50px; height: 50px; border: 3px solid #e9bf78; border-radius: 50%; background: radial-gradient(circle, #f6efcf 0 13%, #426b79 14% 16%, #193f55 17%); box-shadow: inset 0 0 0 2px #fff0cb; }
+.compass-n { position: absolute; top: 2px; left: 50%; transform: translateX(-50%); font: 900 8px ui-monospace, monospace; color: #f6d792; }
+.compass-harbor { position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); font-size: 8px; color: #f6d792; }
+.compass-needle { position: absolute; top: 50%; left: 50%; transform-origin: center; color: #ffb879; font-size: 24px; line-height: 1; text-shadow: 0 1px 1px #132e40; transition: transform .18s ease-out; }
+.compass-copy { display: flex; flex-direction: column; gap: 2px; white-space: nowrap; }
+.compass-copy strong { font: 900 9px ui-monospace, monospace; letter-spacing: .1em; color: #ffda95; }
+.compass-copy span { font: 900 13px ui-monospace, monospace; }
+.engine-controls { position: absolute; z-index: 4; right: 23px; bottom: max(30px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+.engine-status { padding: 5px 7px; border-radius: 6px; background: rgba(5,62,78,.88); font: 900 9px ui-monospace, monospace; letter-spacing: .03em; }
+.cut-engine { pointer-events: auto; cursor: pointer; border: 2px solid #ffe8c7; border-radius: 11px; padding: 9px 12px; background: #825f8f; color: #fff6e2; font: 900 11px ui-monospace, monospace; box-shadow: 0 4px 0 #493452; }
+.cut-engine:active { transform: translateY(3px); box-shadow: 0 1px 0 #493452; }
+.sound-tutorial { position: absolute; z-index: 8; inset: 0; display: grid; place-items: center; padding: 95px 20px 25px; background: rgba(8,35,55,.68); pointer-events: auto; }
+.sound-card { width: min(420px, 100%); max-height: 100%; overflow-y: auto; padding: 24px; border: 3px solid #244b5d; border-radius: 22px; background: #fff6df; box-shadow: 8px 9px 0 #15394e; color: #244b5d; text-align: center; }
+.sound-card .eyebrow { color: #806795; }
+.sound-card h2 { font-size: 30px; line-height: 1; margin: 9px 0; }
+.sound-card p { font-size: 13px; line-height: 1.45; margin: 12px 0 18px; }
+.sound-demo { position: relative; height: 96px; overflow: hidden; border-radius: 13px; background: linear-gradient(145deg,#60bec0,#298eaa); }
+.demo-boat { position: absolute; top: 32px; left: 15%; font-size: 32px; animation: demo-cross 4s ease-in-out infinite; }
+.demo-patrol { position: absolute; top: 27px; right: 17%; display: grid; place-items: center; width: 39px; height: 39px; border: 3px solid #eac6ff; border-radius: 50%; background: #806795; color: #fff; font-size: 20px; }
+.demo-wave { position: absolute; top: 47px; right: 20%; width: 18px; height: 18px; border: 3px solid #ead2ff; border-radius: 50%; animation: demo-pulse 2.2s linear infinite; }
+.wave-two { animation-delay: 1.1s; }
+@keyframes demo-cross { 0% { left: 15%; } 45% { left: 40%; } 70%,100% { left: 66%; } }
+@keyframes demo-pulse { to { transform: translate(-50%,-50%) scale(5); opacity: 0; } }
 .run-top { position: absolute; z-index: 4; top: 110px; left: 24px; display: flex; gap: 8px; width: min(450px, calc(100% - 48px)); pointer-events: none; }
 .run-stat { min-width: 0; flex: 1; background: rgba(5,65,78,.88); border: 2px solid rgba(255,245,218,.75); border-radius: 13px; padding: 9px 10px 10px; box-shadow: 0 4px 0 rgba(5,47,58,.7); }
 .run-stat span { display: block; font: 900 9px ui-monospace, monospace; letter-spacing: .12em; color: #c1e1d7; }
@@ -246,9 +284,16 @@ button:active:not(:disabled) { transform: translateY(2px); }
   .hold-wrap { width: min(100%, 286px); margin-top: 11px; }
   .hold-cell { font-size: 14px; }
   .run-top { top: 85px; left: 12px; width: calc(100% - 24px); }
+  .voyage-tag { top: 67px; left: 13px; font-size: 8px; }
   .run-stat { padding: 7px; }
   .run-stat strong { font-size: 15px; }
   .run-bottom { bottom: max(16px, env(safe-area-inset-bottom)); }
+  .port-compass { left: 12px; bottom: 91px; padding-right: 8px; }
+  .compass-face { width: 41px; height: 41px; }
+  .compass-copy span { font-size: 11px; }
+  .engine-controls { right: 12px; bottom: 91px; }
+  .engine-status { font-size: 7px; }
+  .cut-engine { padding: 7px 8px; font-size: 9px; }
   .result-screen { padding-top: 90px; }
 }
 @media (max-width: 385px) {

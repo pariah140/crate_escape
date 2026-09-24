@@ -47,7 +47,11 @@ On phones, the scene fills the viewport and the current task sits in a scrollabl
 
 ## Sailing motion
 
-During a run, open screen space steers directly to the tapped water point; dragging moves the target, and release preserves a little boat inertia. The camera follows the boat beyond the central route. Patrol boats travel through varied turns and loops. A successful run ends with a close view of the boat docking and cargo crossing onto the pier before the result appears.
+During a run, open screen space steers directly to the tapped water point; dragging moves the target, and release preserves a little boat inertia. The camera follows the boat inside a continuous visible shoreline. The shoreline is also the physical steering boundary. A brass compass at lower left points toward the destination, with distance beside it. Patrol boats travel through varied turns and loops; their visible cones follow their bows. A successful run ends with a close view of the boat docking and cargo crossing onto the pier before the result appears.
+
+## Voyage progression
+
+One hundred deterministic voyages scale the number of rocks, sandbanks, currents, and patrols while narrowing the waterway. The job board previews each voyage's weather, obstacle count, patrol count, and pay multiplier. Later voyages add wind, rain, fog, storms, and night lighting. Sound patrols have purple acoustic rings rather than searchlights. Their first appearance pauses play for an illustrated tutorial; cutting the engine lets a moving boat coast silently through their listening area. Weather, current swirls, shorelines, and sandbanks need visible cues that agree with their collision and force rules.
 
 ## Elevation & Depth
 

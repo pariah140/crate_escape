@@ -3,6 +3,8 @@ import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Share } from '@capacitor/share';
 import { World } from './world';
 import { advanceMotion } from './piloting';
+import { clampToChannel, currentPush, levelPlan, MAX_LEVEL, ROUTE_END, weatherPush, type LevelPlan } from './levels';
+import { heardBySoundPatrol, inVisionCone } from './patrols';
 import {
   BOATS, PORTS, HARBORS, SHAPE_NAMES, canFitAll, canPlace, jobById, jobsForPort,
   loadSave, occupiedCells, persist, rotatedCells, usableCells, isBlocked, boatUpgrade, repairCost, rareChance, specialOfferFor,
@@ -32,6 +34,8 @@ const soundEl = document.querySelector<HTMLButtonElement>('#sound')!;
 const world = new World(sceneHost);
 const save = loadSave();
 world.setBoat(BOATS[save.boat]);
+let currentPlan: LevelPlan = levelPlan(save.level, save.port);
+world.configureLevel(currentPlan);
 
 interface RunState {
   x: number; z: number; vx: number; vz: number; speed: number; hull: number; maxHull: number; heat: number;
@@ -40,6 +44,7 @@ interface RunState {
   pointerStartX: number; pointerStartY: number; pointerDownAt: number; pointerMoved: boolean;
   dragOriginX: number; dragOriginZ: number;
   tapTarget: { x: number; z: number } | null; deadline: number; patrolHeat: number; hotCargo: boolean; ending: boolean;
+  heading: number; engineOn: boolean; tutorialOpen: boolean; tutorialPending: boolean; soundExposure: number;
 }
 
 let phase: Phase = 'board';
@@ -114,13 +119,15 @@ function headerStep(step: string, title: string, subtitle: string): string {
 function renderBoard(): void {
   const previousScroll = view.querySelector<HTMLElement>('.board-panel')?.scrollTop ?? 0;
   const portJobs = availableJobs();
-  const selectedPayout = jobs.reduce((sum, job) => sum + job.payout, 0);
+  const plan = levelPlan(save.level, save.port);
+  const selectedPayout = Math.round(jobs.reduce((sum, job) => sum + job.payout, 0) * plan.payoutMultiplier);
   const totalCells = holdCapacity();
   const usedCells = pieces.reduce((sum, piece) => sum + rotatedCells(piece.shape, 0).length, 0);
   const remainingCells = totalCells - usedCells;
   view.innerHTML = `<main class="side-panel board-panel" aria-label="Job board">
     ${headerStep('01 / PICK A DELIVERY', 'The job board', `A little cargo. A little chaos. Sailing from ${PORTS[save.port]}.`)}
     <div class="port-strip"><div class="port-illustration" aria-hidden="true">⚓</div><div><span class="eyebrow">CURRENT PORT</span><strong>${PORTS[save.port]}</strong></div><button class="port-map-link" type="button" data-action="map">View map →</button></div>
+    <div class="level-strip"><span>VOYAGE ${save.level} / ${MAX_LEVEL}</span><strong>${plan.night ? '☾ NIGHT · ' : ''}${plan.weather.toUpperCase()} SEAS</strong><small>${plan.hazards.length} obstacles · ${plan.currents.length} currents · ${plan.patrols.length} patrols · ×${plan.payoutMultiplier.toFixed(2)} pay</small></div>
     <div class="capacity-strip" aria-label="Cargo hold capacity">
       <div class="capacity-main"><div><span class="eyebrow">${boat().name.toUpperCase()} · ${holdWidth()} × ${holdHeight()} HOLD</span><strong>${usedCells} / ${totalCells} cells booked</strong></div><span class="capacity-left">${remainingCells} left</span></div>
       <div class="capacity-meter" role="progressbar" aria-label="Cargo hold cells booked" aria-valuemin="0" aria-valuemax="${totalCells}" aria-valuenow="${usedCells}"><span style="width:${usedCells / totalCells * 100}%"></span></div>
@@ -182,8 +189,13 @@ function renderPack(): void {
 
 function renderRun(): void {
   view.innerHTML = `<main class="run-overlay" aria-label="Boat run">
+    <div class="weather-layer ${currentPlan.weather} ${currentPlan.night ? 'night' : ''}" aria-hidden="true"></div>
     <div class="run-top"><div class="run-stat"><span>ROUTE</span><strong id="route-progress">0%</strong><div class="meter"><i id="route-fill"></i></div></div><div class="run-stat"><span>HULL</span><strong id="hull-number">100%</strong><div class="meter"><i id="hull-fill"></i></div></div><div class="run-stat heat-stat"><span>HEAT</span><strong id="heat-number">LOW</strong><div class="meter"><i id="heat-fill"></i></div></div></div>
+    <div class="voyage-tag">LEVEL ${currentPlan.number} / ${MAX_LEVEL} · ${currentPlan.night ? 'NIGHT · ' : ''}${currentPlan.weather.toUpperCase()}</div>
+    <div class="port-compass" role="img" aria-label="Compass pointing toward the destination port"><div class="compass-face"><span class="compass-n">N</span><div id="compass-needle" class="compass-needle">➤</div><span class="compass-harbor">⚓</span></div><div class="compass-copy"><strong>TO PORT</strong><span id="port-distance">520 m</span></div></div>
+    <div class="engine-controls"><div id="engine-status" class="engine-status">ENGINE IDLE</div><button class="cut-engine" type="button" data-action="cut-engine" aria-label="Cut engine and coast">✦ CUT ENGINE</button></div>
     <div class="run-bottom"><div class="run-instruction"><strong id="run-instruction-title">DRAG TO PILOT</strong><span id="run-instruction-detail">Tap a spot or drag · release to coast</span></div><div id="run-timer" class="run-timer">00:00</div></div>
+    ${run?.tutorialOpen ? `<div class="sound-tutorial"><div class="sound-card"><span class="eyebrow">NEW PATROL · ACOUSTIC LISTENING</span><h2>Quiet waters, loud engines.</h2><div class="sound-demo" aria-hidden="true"><span class="demo-boat">🚤</span><span class="demo-wave wave-one"></span><span class="demo-wave wave-two"></span><span class="demo-patrol">◉</span></div><p>Build speed before its listening ring. Then release the drag or tap target to cut the engine and coast silently through. You can steer again once clear.</p><button class="primary-button full" type="button" data-action="dismiss-sound-tutorial">Got it · set sail →</button></div></div>` : ''}
   </main>`;
   updateHud();
 }
@@ -342,17 +354,19 @@ function placeAt(x: number, y: number): void {
 
 function beginRun(): void {
   if (!pieces.length || pieces.some(piece => piece.x === null)) return;
+  currentPlan = levelPlan(save.level, save.port);
+  world.configureLevel(currentPlan);
   world.resetVoyage();
   const maxHull = boat().hull + boatUpgrade(save).hull * 15;
   const patrolHeat = jobs.reduce((sum, job) => sum + job.heat, 0);
   const hotCargo = jobs.some(job => job.kind === 'hot');
-  run = { x: 0, z: 0, vx: 0, vz: 0, speed: 0, hull: maxHull * (save.boatCondition[save.boat] ?? 100) / 100, maxHull, heat: Math.min(65, patrolHeat * 4 + (hotCargo ? 8 : 0)), contact: 0, damageCooldown: 0, collisions: 0, elapsed: 0, holding: false, pointer: null, pointerX: 0, pointerY: 0, pointerStartX: 0, pointerStartY: 0, pointerDownAt: 0, pointerMoved: false, dragOriginX: 0, dragOriginZ: 0, tapTarget: null, deadline: jobs.some(job => job.kind === 'perishable') ? 70 : Infinity, patrolHeat, hotCargo, ending: false };
+  run = { x: 0, z: 0, vx: 0, vz: 0, speed: 0, hull: maxHull * (save.boatCondition[save.boat] ?? 100) / 100, maxHull, heat: Math.min(65, patrolHeat * 4 + (hotCargo ? 8 : 0)), contact: 0, damageCooldown: 0, collisions: 0, elapsed: 0, holding: false, pointer: null, pointerX: 0, pointerY: 0, pointerStartX: 0, pointerStartY: 0, pointerDownAt: 0, pointerMoved: false, dragOriginX: 0, dragOriginZ: 0, tapTarget: null, deadline: jobs.some(job => job.kind === 'perishable') ? 70 : Infinity, patrolHeat, hotCargo, ending: false, heading: 0, engineOn: false, tutorialOpen: false, tutorialPending: currentPlan.patrols.some(patrol => patrol.sound) && !save.soundTutorialSeen, soundExposure: 0 };
   heldKeys.clear(); phase = 'run'; render(); beep(400, 0.15, 'triangle'); notify('Cargo aboard. Tap the water or drag to pilot!', 'success');
 }
 
 function updateHud(): void {
   if (!run) return;
-  const progress = Math.max(0, Math.min(100, Math.round(run.z / 520 * 100)));
+  const progress = Math.max(0, Math.min(100, Math.round(run.z / ROUTE_END * 100)));
   const hull = Math.max(0, Math.round(run.hull / run.maxHull * 100));
   const heat = Math.round(run.heat);
   const set = (id: string, value: string) => { const el = document.getElementById(id); if (el) el.textContent = value; };
@@ -363,11 +377,15 @@ function updateHud(): void {
   const minutes = Math.floor(run.elapsed / 60).toString().padStart(2, '0');
   const seconds = Math.floor(run.elapsed % 60).toString().padStart(2, '0');
   set('run-timer', `${minutes}:${seconds}`);
+  set('port-distance', `${Math.round(Math.hypot(-1.8 - run.x, 532 - run.z))} m`);
+  set('engine-status', run.engineOn ? 'ENGINE ON · PATROLS CAN HEAR' : 'ENGINE CUT · COASTING');
+  const needle = document.getElementById('compass-needle');
+  if (needle) needle.style.transform = `translate(-50%, -50%) rotate(${Math.atan2(-1.8 - run.x, 532 - run.z) - run.heading - Math.PI / 2}rad)`;
 }
 
 function endRun(won: boolean, reason: string): void {
   if (!run || phase !== 'run') return;
-  const base = jobs.reduce((sum, job) => sum + job.payout, 0);
+  const base = Math.round(jobs.reduce((sum, job) => sum + job.payout, 0) * currentPlan.payoutMultiplier);
   const full = pieces.reduce((sum, piece) => sum + occupiedCells(piece).length, 0) === holdCapacity();
   const bonus = won && full ? Math.round(base * 0.1) : 0;
   let payout = won ? base + bonus : 0;
@@ -377,6 +395,7 @@ function endRun(won: boolean, reason: string): void {
   const rep = won ? 8 + jobs.length * 4 : -3;
   save.boatCondition[save.boat] = Math.max(30, Math.round(run.hull / run.maxHull * 100));
   save.cash += payout; save.reputation = Math.max(0, save.reputation + rep); save.runs++;
+  if (won) save.level = Math.min(MAX_LEVEL, save.level + 1);
   const previouslyOpen = save.unlockedPorts.length;
   refreshHarborUnlocks(save);
   result = { won, reason, payout, base, bonus, adjustment, rep };
@@ -426,53 +445,75 @@ function dragPoint(): { x: number; z: number } | null {
 }
 
 function updateRun(dt: number): void {
-  if (!run || phase !== 'run') return;
-  if (run.ending) return;
+  if (!run || phase !== 'run' || run.ending || run.tutorialOpen) return;
+  if (run.tutorialPending && world.patrols.some(patrol => patrol.sound && Math.abs(run!.z - patrol.z) < 37)) {
+    run.tutorialPending = false; run.tutorialOpen = true; run.tapTarget = null; run.holding = false; run.pointer = null;
+    heldKeys.clear(); sceneHost.classList.remove('steering'); renderRun(); return;
+  }
   run.elapsed += dt; run.damageCooldown = Math.max(0, run.damageCooldown - dt);
-  const maxSpeed = 9.2 * (boat().speed + boatUpgrade(save).engine * 0.09);
+  const maxSpeed = 9.2 * (boat().speed + boatUpgrade(save).engine * .09);
   let target: { x: number; z: number } | null = null;
   if (run.holding && run.pointer !== null) target = dragPoint();
   else if (!heldKeys.size && run.tapTarget) target = run.tapTarget;
-  if (target) {
-    if (Math.hypot(target.x - run.x, target.z - run.z) < 0.65 && !run.holding) {
-      run.tapTarget = null; target = null;
-    }
-  }
+  if (target && Math.hypot(target.x - run.x, target.z - run.z) < .65 && !run.holding) { run.tapTarget = null; target = null; }
+  if (target) target = { x: clampToChannel(currentPlan, target.x, Math.max(0, Math.min(ROUTE_END, target.z))), z: Math.max(0, Math.min(ROUTE_END, target.z)) };
   const dx = Number(heldKeys.has('arrowright') || heldKeys.has('d')) - Number(heldKeys.has('arrowleft') || heldKeys.has('a'));
   const dz = Number(heldKeys.has('arrowup') || heldKeys.has('w')) - Number(heldKeys.has('arrowdown') || heldKeys.has('s'));
-  const motion = advanceMotion(run, target, { x: dx, z: dz }, maxSpeed, dt, boat());
-  run.x = motion.x; run.z = motion.z; run.vx = motion.vx; run.vz = motion.vz;
+  run.engineOn = Boolean(target || dx || dz);
+  const nearListeningBoat = world.patrols.some(patrol => patrol.sound && Math.hypot(run!.x - patrol.x, run!.z - patrol.z) < 19);
+  const handling = !run.engineOn && nearListeningBoat ? { ...boat(), coast: .16 } : boat();
+  const motion = advanceMotion(run, target, { x: dx, z: dz }, maxSpeed, dt, handling);
+  const lateral = currentPush(currentPlan, motion.x, motion.z, run.elapsed) + weatherPush(currentPlan, run.elapsed);
+  run.vx = motion.vx + lateral * dt; run.vz = motion.vz;
+  const attemptedX = motion.x + lateral * dt * dt * .5;
+  run.z = Math.max(-2, Math.min(ROUTE_END, motion.z));
+  run.x = clampToChannel(currentPlan, attemptedX, run.z);
+  if (attemptedX !== run.x) {
+    run.vx = 0; run.tapTarget = null;
+    if (run.damageCooldown === 0 && Math.hypot(motion.vx, motion.vz) > 2.8) {
+      run.hull = Math.max(0, run.hull - 14); run.collisions++; run.damageCooldown = 1.35;
+      showImpact('−14 HULL'); beep(135, .22, 'sawtooth'); notify('Shoreline! Keep within the marked channel.', 'danger');
+    }
+  }
   run.speed = Math.hypot(run.vx, run.vz);
-  let spotted = false;
-  let contact = false;
+  if (run.speed > .25) {
+    const desired = Math.atan2(run.vx, run.vz);
+    run.heading += Math.atan2(Math.sin(desired - run.heading), Math.cos(desired - run.heading)) * Math.min(1, dt * 3.2);
+  }
+  let spotted = false; let heard = false; let contact = false;
   for (const patrol of world.patrols) {
-    const dz = run.z - patrol.mesh.position.z;
-    const dx = Math.abs(run.x - patrol.x);
-    if (dz > -12 && dz < -2 && dx < 3.1 + Math.min(run.patrolHeat * 0.15, 1.8) + (run.hotCargo ? 0.6 : 0)) spotted = true;
-    if (Math.abs(dz) < 1.8 && dx < 1.8) contact = true;
+    const distance = Math.hypot(run.x - patrol.x, run.z - patrol.z);
+    if (patrol.sound) {
+      if (heardBySoundPatrol(distance, run.engineOn, run.speed)) heard = true;
+    } else if (inVisionCone(patrol, run.x, run.z, 11.5 + run.patrolHeat * .12 + (run.hotCargo ? 2 : 0), .52)) spotted = true;
+    if (distance < 2.1) contact = true;
   }
   run.contact = contact ? run.contact + dt : Math.max(0, run.contact - dt * 1.5);
-  run.heat = Math.max(run.hotCargo ? 12 : 0, Math.min(100, run.heat + (spotted ? 37 : run.hotCargo ? -2 : -8) * dt));
-  if (spotted && run.heat > 50 && Math.floor(run.elapsed * 2) % 5 === 0) beep(340, 0.08, 'square');
-  if (run.contact >= 2) { run.ending = true; showImpact('CAUGHT!'); window.setTimeout(() => endRun(false, 'caught'), 650); return; }
+  run.soundExposure = heard ? run.soundExposure + dt : Math.max(0, run.soundExposure - dt * 1.8);
+  run.heat = Math.max(run.hotCargo ? 12 : 0, Math.min(100, run.heat + (spotted ? 37 : heard ? 48 : run.hotCargo ? -2 : -8) * dt));
+  const title = document.getElementById('run-instruction-title');
+  const detail = document.getElementById('run-instruction-detail');
+  if (title && detail && !run.ending) {
+    title.textContent = heard ? 'SONAR HEARS YOU' : !run.engineOn && currentPlan.patrols.some(p => p.sound) ? 'SILENT GLIDE' : currentPlan.weather === 'storm' ? 'HEAVY WEATHER' : 'DRAG TO PILOT';
+    detail.textContent = heard ? 'Release to cut the engine and coast' : !run.engineOn && currentPlan.patrols.some(p => p.sound) ? 'Momentum carries you past listening patrols' : currentPlan.currents.some(c => Math.hypot(run!.x - c.x, run!.z - c.z) < c.radius) ? 'Strong current · steer against the flow' : 'Tap a spot or drag · release to coast';
+  }
+  if (run.contact >= 1.5 || run.soundExposure >= 1.8 || run.heat >= 100) { run.ending = true; showImpact('CAUGHT!'); window.setTimeout(() => endRun(false, 'caught'), 650); return; }
   for (const hazard of world.hazards) {
-    if (Math.hypot(run.x - hazard.x, run.z - hazard.z) < hazard.radius + 0.85 && run.damageCooldown === 0) {
-      const damage = hazard.kind === 'rock' ? 24 : 12;
-      run.hull = Math.max(0, run.hull - damage);
-      run.collisions++; run.damageCooldown = 1.25;
+    if (Math.hypot(run.x - hazard.x, run.z - hazard.z) < hazard.radius + .85 && run.damageCooldown === 0) {
+      const damage = hazard.kind === 'rock' ? 24 : hazard.kind === 'sandbank' ? 17 : 12;
+      run.hull = Math.max(0, run.hull - damage); run.collisions++; run.damageCooldown = 1.25;
       const awayX = run.x - hazard.x, awayZ = run.z - hazard.z;
       const awayLength = Math.hypot(awayX, awayZ) || 1;
       run.vx = awayX / awayLength * 2.8; run.vz = awayZ / awayLength * 2.8;
-      run.speed = Math.hypot(run.vx, run.vz);
-      run.tapTarget = null;
+      run.speed = Math.hypot(run.vx, run.vz); run.tapTarget = null;
       showImpact(`−${damage} HULL`);
-      beep(135, 0.22, 'sawtooth'); Haptics.impact({ style: ImpactStyle.Heavy }).catch(() => undefined);
-      notify(hazard.kind === 'rock' ? 'Rock! Steer into open water.' : 'Buoy bump! Watch the channel.', 'danger');
-      updateHud();
+      beep(135, .22, 'sawtooth'); Haptics.impact({ style: ImpactStyle.Heavy }).catch(() => undefined);
+      notify(hazard.kind === 'rock' ? 'Rock! Steer into open water.' : hazard.kind === 'sandbank' ? 'Sandbank! The shallows scrape your hull.' : 'Buoy bump! Watch the channel.', 'danger');
       if (run.hull <= 0) { run.ending = true; window.setTimeout(() => endRun(false, 'sunk'), 650); return; }
     }
   }
-  if (run.z >= 520) { beginDeliveryDocking(); return; }
+  if (run.hull <= 0) { run.ending = true; window.setTimeout(() => endRun(false, 'sunk'), 650); return; }
+  if (run.z >= ROUTE_END) { beginDeliveryDocking(); return; }
   if (performance.now() - lastHud > 90) { updateHud(); lastHud = performance.now(); }
 }
 
@@ -488,6 +529,8 @@ function handleAction(action: string, id?: string, target?: HTMLElement): void {
   else if (action === 'rotate') { const piece = pieces.find(item => item.id === selected); if (piece && piece.x === null) { piece.rotation = (piece.rotation + 1) % 4; tick(); render(); } }
   else if (action === 'cell' && target) placeAt(Number(target.dataset.x), Number(target.dataset.y));
   else if (action === 'sail') beginRun();
+  else if (action === 'dismiss-sound-tutorial' && run) { run.tutorialOpen = false; save.soundTutorialSeen = true; saveProgress(); renderRun(); notify('Build speed, release to coast, then steer again once clear.'); }
+  else if (action === 'cut-engine' && run) { run.tapTarget = null; run.holding = false; run.pointer = null; heldKeys.clear(); sceneHost.classList.remove('steering'); run.engineOn = false; updateHud(); }
   else if (action === 'next') { jobs = []; pieces = []; selected = null; phase = 'board'; render(); }
   else if (action === 'share' && result?.won) {
     const text = `I delivered ${jobs.map(job => job.cargo).join(', ')} in Crate Escape and earned ${money(result.payout)}. Pack it. Run it. Don't get caught!`;
@@ -547,7 +590,7 @@ view.addEventListener('pointerdown', event => {
 });
 
 window.addEventListener('pointerdown', event => {
-  if (phase === 'run' && run && !run.ending && run.pointer === null && event.isPrimary && event.button === 0
+  if (phase === 'run' && run && !run.ending && !run.tutorialOpen && run.pointer === null && event.isPrimary && event.button === 0
     && !(event.target as HTMLElement).closest('button, a, input, select, textarea')) {
     event.preventDefault();
     run.pointer = event.pointerId; run.holding = true; run.tapTarget = null;
@@ -593,7 +636,7 @@ window.addEventListener('pointercancel', event => {
 
 window.addEventListener('keydown', event => {
   if (phase === 'pack' && (event.key === 'r' || event.key === 'R')) { event.preventDefault(); handleAction('rotate'); }
-  if (phase === 'run' && run) {
+  if (phase === 'run' && run && !run.tutorialOpen) {
     const key = event.key.toLowerCase();
     if (['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'a', 'd', 'w', 's'].includes(key)) {
       event.preventDefault(); heldKeys.add(key); run.tapTarget = null;
@@ -612,7 +655,7 @@ function frame(now: number): void {
   const dt = Math.min((now - previous) / 1000, 0.05); previous = now;
   if (phase === 'run') updateRun(dt);
   const target = run?.holding && run.pointer !== null ? dragPoint() : run?.tapTarget || null;
-  world.update(dt, phase === 'run', run?.x || 0, run?.z || 0, run?.heat || 0, run?.speed || 0, run?.vx || 0, run?.vz || 0, target);
+  world.update(dt, phase === 'run' && !run?.tutorialOpen, run?.x || 0, run?.z || 0, run?.heat || 0, run?.speed || 0, run?.vx || 0, run?.vz || 0, target);
   requestAnimationFrame(frame);
 }
 

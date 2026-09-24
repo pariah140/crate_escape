@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { patrolPose } from './patrols';
+import { channelHalfWidth, levelPlan, type LevelPlan } from './levels';
 import { BOATS, type BoatDefinition, type BoatStyle } from './model';
 
 const mat = (color: string, roughness = 0.85) => new THREE.MeshStandardMaterial({ color, roughness, flatShading: true });
@@ -122,6 +123,34 @@ function makeBuoy(parent: THREE.Object3D, x: number, z: number): THREE.Group {
   parent.add(buoy); return buoy;
 }
 
+function makeSandbank(parent: THREE.Object3D, x: number, z: number, radius: number): THREE.Group {
+  const group = new THREE.Group(); group.position.set(x, 0, z);
+  const shoal = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * 1.16, .18, 12), mat('#e8c77d'));
+  shoal.scale.z = .65; shoal.position.y = -.04; group.add(shoal);
+  const lip = new THREE.Mesh(new THREE.RingGeometry(radius * .79, radius * 1.16, 24), new THREE.MeshBasicMaterial({ color: '#d9f2d5', transparent: true, opacity: .48, side: THREE.DoubleSide, depthWrite: false }));
+  lip.rotation.x = -Math.PI / 2; lip.scale.y = .68; lip.position.y = .035; group.add(lip);
+  parent.add(group); return group;
+}
+
+function makeChannelBanks(parent: THREE.Object3D, plan: LevelPlan): void {
+  for (const side of [-1, 1]) {
+    for (const [offset, span, color, height] of [[0, 34, '#e9c783', .055], [4.3, 29, '#73b886', .11]] as const) {
+      const vertices: number[] = []; const indices: number[] = [];
+      for (let z = -22; z <= 548; z += 6) {
+        const edge = side * (channelHalfWidth(plan, z) + offset);
+        vertices.push(edge, height, z, side * (channelHalfWidth(plan, z) + offset + span), height, z);
+        if (z > -22) { const i = (z + 22) / 6 * 2; indices.push(i - 2, i - 1, i, i - 1, i + 1, i); }
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+      geometry.setIndex(indices); geometry.computeVertexNormals();
+      const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide }));
+      parent.add(mesh);
+    }
+    for (let z = 22; z < 520; z += 42) makeIsland(parent, side * (channelHalfWidth(plan, z) + 9), z, .42 + ((z * 7) % 5) * .035);
+  }
+}
+
 function makeIsland(parent: THREE.Object3D, x: number, z: number, scale = 1): void {
   const island = new THREE.Group(); island.position.set(x, 0, z); island.scale.setScalar(scale);
   const sand = new THREE.Mesh(new THREE.CylinderGeometry(5.8, 6.4, 0.7, 9), mat(palette.sand));
@@ -218,12 +247,13 @@ function makeHullFoam(width: number, length: number): THREE.Mesh {
   return foam;
 }
 
-export interface Hazard { x: number; z: number; radius: number; kind: 'rock' | 'buoy'; mesh: THREE.Group; }
-export interface Patrol { x: number; z: number; baseX: number; baseZ: number; phase: number; heading: number; chase: number; mesh: THREE.Group; light: THREE.Mesh; foam: THREE.Mesh; wake: THREE.Mesh; }
+export interface Hazard { x: number; z: number; radius: number; kind: 'rock' | 'buoy' | 'sandbank'; mesh: THREE.Group; }
+export interface Patrol { x: number; z: number; baseX: number; baseZ: number; phase: number; heading: number; chase: number; sound: boolean; mesh: THREE.Group; light: THREE.Mesh; ring: THREE.Mesh | null; foam: THREE.Mesh; wake: THREE.Mesh; }
 interface DockParcel { mesh: THREE.Object3D; start: THREE.Vector3; end: THREE.Vector3; launch: number }
 interface Docking { fromX: number; fromZ: number; time: number; approach: number; parcels: Array<DockParcel | null> }
 
 export class World {
+  private plan: LevelPlan = levelPlan(1, 0);
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.OrthographicCamera(-12, 12, 19, -19, 0.1, 200);
@@ -385,6 +415,18 @@ export class World {
     this.boatFoam.scale.set(1.68 * size, 2.55 * size, 1);
   }
 
+  configureLevel(plan: LevelPlan): void {
+    this.plan = plan;
+    this.buildRoute();
+    const color = plan.night ? '#0c3f63' : plan.weather === 'storm' ? '#477387' : plan.weather === 'fog' ? '#83b5b9' : palette.water;
+    this.scene.background = new THREE.Color(color);
+    this.scene.fog = new THREE.Fog(color, plan.weather === 'fog' ? 35 : 75, plan.weather === 'fog' ? 105 : 150);
+    this.renderer.setClearColor(color);
+    const water = this.ocean.material as THREE.ShaderMaterial;
+    water.uniforms.uDeep.value.set(plan.night ? '#073e64' : plan.weather === 'storm' ? '#426c7e' : '#087f94');
+    water.uniforms.uLight.value.set(plan.night ? '#246f91' : plan.weather === 'storm' ? '#779ea8' : '#2ba9b1');
+  }
+
   showShipyard(owned: number[], active: number): void {
     this.inYard = true; this.yardCount = owned.length; this.yard.clear(); this.yard.visible = true; this.route.visible = false;
     this.boat.visible = false; this.boatFoam.visible = false; this.bowWash.visible = false;
@@ -457,35 +499,53 @@ export class World {
   }
 
   private buildRoute(): void {
+    this.route.traverse(object => {
+      if (!(object instanceof THREE.Mesh)) return;
+      object.geometry.dispose();
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      materials.forEach(material => material.dispose());
+    });
     this.route.clear(); this.hazards.length = 0; this.patrols.length = 0;
+    this.fishSchools.length = 0; this.turtles.length = 0; this.gulls.length = 0;
+    makeChannelBanks(this.route, this.plan);
     makeHarbour(this.route, -13); makeHarbour(this.route, 535, true);
-    for (let z = 20; z < 535; z += 36) {
-      makeIsland(this.route, z % 72 === 20 ? -17 : 17, z, 0.55 + (z % 4) * 0.08);
+    for (const hazard of this.plan.hazards) {
+      const mesh = hazard.kind === 'rock' ? makeRock(this.route, hazard.x, hazard.z, hazard.radius)
+        : hazard.kind === 'sandbank' ? makeSandbank(this.route, hazard.x, hazard.z, hazard.radius)
+          : makeBuoy(this.route, hazard.x, hazard.z);
+      this.hazards.push({ ...hazard, mesh });
     }
-    const rocks = [[-4.5, 34, 1.5], [3.8, 69, 1.8], [-2.5, 113, 1.55], [5.1, 154, 1.65], [-5.4, 203, 1.6], [1.6, 248, 1.6], [5, 290, 1.5], [-3.7, 338, 1.7], [2.7, 383, 1.75], [-5, 430, 1.55], [4.5, 473, 1.65]];
-    for (const [x, z, radius] of rocks) this.hazards.push({ x, z, radius, kind: 'rock', mesh: makeRock(this.route, x, z, radius) });
-    for (let i = 0; i < 15; i++) {
-      const z = 17 + i * 33;
-      const x = (i % 2 ? -1 : 1) * (7.2 + (i % 3) * 0.3);
-      this.hazards.push({ x, z, radius: 0.6, kind: 'buoy', mesh: makeBuoy(this.route, x, z) });
+    for (const current of this.plan.currents) {
+      const swirl = new THREE.Group(); swirl.position.set(current.x, .025, current.z);
+      for (let i = 0; i < 3; i++) {
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(1.2 + i * .7, .045, 3, 18, Math.PI * 1.3), new THREE.MeshBasicMaterial({ color: i === 1 ? '#b2efdd' : '#6bcfc6', transparent: true, opacity: .65, depthWrite: false }));
+        ring.rotation.x = -Math.PI / 2; ring.rotation.z = i * 1.8; ring.position.y = i * .006; swirl.add(ring);
+      }
+      this.route.add(swirl);
     }
-    for (let i = 0; i < 6; i++) {
-      const z = 55 + i * 78;
-      const x = i % 2 ? -4 : 4;
+    for (let i = 0; i < this.plan.patrols.length; i++) {
+      const slot = this.plan.patrols[i]; const x = slot.x; const z = slot.z;
       const initial = patrolPose(i, 0, x, z, i * 1.8);
-      const mesh = makeBoat('#527798', 'patrol'); mesh.scale.setScalar(0.72); mesh.position.set(initial.x, -0.68, initial.z); mesh.rotation.y = initial.heading; this.route.add(mesh);
-      const foam = makeHullFoam(1.22, 1.86); foam.position.set(x, 0.04, z); this.route.add(foam);
-      const wake = new THREE.Mesh(
-        new THREE.TorusGeometry(0.58, 0.045, 3, 10, Math.PI),
-        new THREE.MeshBasicMaterial({ color: '#d8f8e7', transparent: true, opacity: 0.32, depthWrite: false }),
-      );
-      wake.rotation.x = -Math.PI / 2; wake.position.set(x, 0.05, z + 2); this.route.add(wake);
-      const light = new THREE.Mesh(new THREE.ConeGeometry(3.6, 9, 18, 1, true), new THREE.MeshBasicMaterial({ color: '#fff1a0', transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide }));
-      light.rotation.x = Math.PI / 2; light.position.set(0, 1.2, -5); mesh.add(light);
-      this.patrols.push({ x: initial.x, z: initial.z, baseX: x, baseZ: z, phase: i * 1.8, heading: initial.heading, chase: 0, mesh, light, foam, wake });
+      const mesh = makeBoat(slot.sound ? '#846aa1' : '#527798', 'patrol'); mesh.scale.setScalar(slot.sound ? .8 : .72); mesh.position.set(initial.x, -.68, initial.z); mesh.rotation.y = initial.heading; this.route.add(mesh);
+      if (slot.sound) {
+        cylinder(mesh, '#ffe6a2', 0, 3.75, -.3, .36, .14, 10);
+        cylinder(mesh, '#dcb7f1', 0, 3.47, -.3, .09, .62, 8);
+      }
+      const foam = makeHullFoam(1.22, 1.86); foam.position.set(x, .04, z); this.route.add(foam);
+      const wake = new THREE.Mesh(new THREE.TorusGeometry(.58, .045, 3, 10, Math.PI), new THREE.MeshBasicMaterial({ color: '#d8f8e7', transparent: true, opacity: .32, depthWrite: false }));
+      wake.rotation.x = -Math.PI / 2; wake.position.set(x, .05, z + 2); this.route.add(wake);
+      const light = new THREE.Mesh(new THREE.ConeGeometry(3.6, 9, 18, 1, true), new THREE.MeshBasicMaterial({ color: '#fff1a0', transparent: true, opacity: .14, depthWrite: false, side: THREE.DoubleSide }));
+      light.rotation.x = -Math.PI / 2; light.position.set(0, 1.2, 4.8); light.visible = !slot.sound; mesh.add(light);
+      const ring = slot.sound ? new THREE.Mesh(new THREE.RingGeometry(11.5, 11.85, 48), new THREE.MeshBasicMaterial({ color: '#d6b6fa', transparent: true, opacity: .27, side: THREE.DoubleSide, depthWrite: false })) : null;
+      if (ring) { ring.rotation.x = -Math.PI / 2; this.route.add(ring); }
+      this.patrols.push({ x: initial.x, z: initial.z, baseX: x, baseZ: z, phase: i * 1.8, heading: initial.heading, chase: 0, sound: slot.sound, mesh, light, ring, foam, wake });
     }
     // Small moving glints add texture without a remote water asset.
-    this.waterMarks.forEach(mark => this.scene.remove(mark)); this.waterMarks.length = 0;
+    this.waterMarks.forEach(mark => {
+      this.scene.remove(mark);
+      mark.traverse(object => { if (object instanceof THREE.Mesh) { object.geometry.dispose(); (object.material as THREE.Material).dispose(); } });
+    });
+    this.waterMarks.length = 0;
     for (let i = 0; i < 100; i++) {
       const mark = new THREE.Group();
       const line = box(mark, i % 3 ? '#55bec5' : '#8bd4cf', 0, 0.015, 0, 0.24 + (i % 4) * 0.18, 0.015, 0.04);
@@ -727,6 +787,12 @@ export class World {
       patrol.wake.position.set(wakeX, this.waterHeight(wakeX, wakeZ) + 0.06, wakeZ);
       patrol.wake.rotation.z = Math.PI - patrol.heading;
       (patrol.light.material as THREE.MeshBasicMaterial).opacity = 0.12 + Math.sin(this.elapsed * 2 + i) * 0.03;
+      if (patrol.ring) {
+        patrol.ring.position.set(nextX, patrolSurface + .045, nextZ);
+        const pulse = 1 + (this.elapsed * .55 + i * .3) % 1 * .25;
+        patrol.ring.scale.setScalar(pulse);
+        (patrol.ring.material as THREE.MeshBasicMaterial).opacity = .32 - (pulse - 1) * .7;
+      }
     });
     const narrow = this.width < 720;
     const targetZ = this.inYard ? -14 : this.docking ? z + (narrow ? 3 : 5) : running ? z + (narrow ? 8 : 14) : -7;

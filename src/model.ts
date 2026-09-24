@@ -1,3 +1,5 @@
+import { MAX_LEVEL } from './levels';
+
 export type Phase = 'board' | 'pack' | 'run' | 'result' | 'yard' | 'market' | 'map';
 export type CargoKind = 'standard' | 'bulky' | 'hot' | 'perishable' | 'fragile' | 'vip';
 export type Cell = readonly [number, number];
@@ -46,6 +48,8 @@ export interface SaveData {
   boatCondition: Record<number, number>;
   yardUpgrades: YardUpgrades;
   runs: number;
+  level: number;
+  soundTutorialSeen: boolean;
   sound: boolean;
 }
 
@@ -234,7 +238,7 @@ export function canFitAll(pieces: Piece[], width: number, height: number, blocke
 }
 
 export function defaultSave(): SaveData {
-  return { cash: 80, reputation: 0, boat: 0, ownedBoats: [0], port: 0, unlockedPorts: [0], boatUpgrades: { 0: { engine: 0, hull: 0 } }, boatCondition: { 0: 100 }, yardUpgrades: { repairBay: 0, brokerDesk: 0 }, runs: 0, sound: true };
+  return { cash: 80, reputation: 0, boat: 0, ownedBoats: [0], port: 0, unlockedPorts: [0], boatUpgrades: { 0: { engine: 0, hull: 0 } }, boatCondition: { 0: 100 }, yardUpgrades: { repairBay: 0, brokerDesk: 0 }, runs: 0, level: 1, soundTutorialSeen: false, sound: true };
 }
 
 export function loadSave(): SaveData {
@@ -255,7 +259,8 @@ export function loadSave(): SaveData {
       ownedBoats: owned, port: Number.isInteger(data.port) && data.port! >= 0 && data.port! < HARBORS.length ? data.port! : 0,
       unlockedPorts: [...new Set([0, ...(Array.isArray(data.unlockedPorts) ? data.unlockedPorts : data.port === 1 ? [1] : [])])].filter(index => Number.isInteger(index) && index >= 0 && index < HARBORS.length), boatUpgrades, boatCondition,
       yardUpgrades: { repairBay: Math.max(0, Math.min(3, Number(data.yardUpgrades?.repairBay) || 0)), brokerDesk: Math.max(0, Math.min(3, Number(data.yardUpgrades?.brokerDesk) || 0)) },
-      runs: Math.max(0, Number(data.runs) || 0), sound: typeof data.sound === 'boolean' ? data.sound : initial.sound };
+      runs: Math.max(0, Number(data.runs) || 0), level: Math.max(1, Math.min(MAX_LEVEL, Number(data.level) || (Math.max(0, Number(data.runs) || 0) + 1))),
+      soundTutorialSeen: data.soundTutorialSeen === true, sound: typeof data.sound === 'boolean' ? data.sound : initial.sound };
     refreshHarborUnlocks(restored);
     if (!restored.unlockedPorts.includes(restored.port)) restored.port = 0;
     return restored;

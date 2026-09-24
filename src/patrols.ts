@@ -1,5 +1,16 @@
 export interface PatrolPose { x: number; z: number; heading: number }
 
+export function inVisionCone(patrol: PatrolPose, boatX: number, boatZ: number, range = 13, halfAngle = .46): boolean {
+  const dx = boatX - patrol.x, dz = boatZ - patrol.z;
+  const forward = dx * Math.sin(patrol.heading) + dz * Math.cos(patrol.heading);
+  const sideways = dx * Math.cos(patrol.heading) - dz * Math.sin(patrol.heading);
+  return forward > 0 && forward < range && Math.abs(sideways) < 1.2 + forward * Math.tan(halfAngle);
+}
+
+export function heardBySoundPatrol(distance: number, engineOn: boolean, speed: number): boolean {
+  return engineOn && speed > 1.15 && distance < 11 + Math.min(speed, 12) * .34;
+}
+
 export function patrolPose(index: number, time: number, baseX: number, baseZ: number, phase: number): PatrolPose {
   const angle = time * (0.53 + index * 0.025) + phase;
   let x: number; let z: number; let vx: number; let vz: number;
