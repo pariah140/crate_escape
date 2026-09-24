@@ -24,27 +24,46 @@ function cylinder(parent: THREE.Object3D, color: string, x: number, y: number, z
 function makeBoat(color: string, patrol = false): THREE.Group {
   const boat = new THREE.Group();
   const shape = new THREE.Shape();
-  shape.moveTo(0, 2.45); shape.lineTo(-1.25, 1.25); shape.lineTo(-1.34, -1.65);
-  shape.quadraticCurveTo(0, -2.12, 1.34, -1.65); shape.lineTo(1.25, 1.25); shape.closePath();
-  const hull = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.62, bevelEnabled: true, bevelThickness: 0.12, bevelSize: 0.12, bevelSegments: 1, curveSegments: 2 }), mat(color));
+  shape.moveTo(0, -2.45); shape.lineTo(-1.25, -1.22); shape.lineTo(-1.34, 1.58);
+  shape.quadraticCurveTo(0, 2.12, 1.34, 1.58); shape.lineTo(1.25, -1.22); shape.closePath();
+  const hull = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.72, bevelEnabled: true, bevelThickness: 0.14, bevelSize: 0.12, bevelSegments: 2, curveSegments: 5 }), mat(color));
   hull.rotation.x = -Math.PI / 2; hull.position.y = 0.85; hull.castShadow = true; hull.receiveShadow = true; boat.add(hull);
-  box(boat, '#fff8e2', 0, 1.49, -0.1, 2.08, 0.12, 2.8);
-  box(boat, patrol ? '#d4e6eb' : '#9d6a46', 0, 1.6, -1.05, 1.65, 0.16, 0.65);
-  box(boat, patrol ? '#466b82' : '#fff6db', 0, 1.85, -0.62, 1.22, 0.55, 0.85);
-  box(boat, '#5eaeae', 0, 2.08, -0.22, 1.13, 0.31, 0.09);
-  box(boat, '#fff5da', 0, 1.62, 1.37, 0.15, 0.1, 0.6);
-  cylinder(boat, '#566976', 0, 1.63, -2.06, 0.26, 0.34);
+  const deck = new THREE.Mesh(new THREE.ShapeGeometry(shape, 5), mat('#fff6d9'));
+  deck.rotation.x = -Math.PI / 2; deck.position.y = 1.66; deck.scale.set(0.82, 0.83, 1); deck.receiveShadow = true; boat.add(deck);
+  const railPath = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0, 1.7, 2.34), new THREE.Vector3(-1.15, 1.7, 1.13),
+    new THREE.Vector3(-1.24, 1.7, -1.52), new THREE.Vector3(0, 1.7, -1.96),
+    new THREE.Vector3(1.24, 1.7, -1.52), new THREE.Vector3(1.15, 1.7, 1.13),
+  ], true, 'centripetal');
+  const rail = new THREE.Mesh(new THREE.TubeGeometry(railPath, 44, 0.075, 5, true), mat(patrol ? '#dceef0' : '#fff1bd'));
+  rail.castShadow = true; boat.add(rail);
+  box(boat, patrol ? '#d4e6eb' : '#a97953', 0, 1.75, -1.22, 1.55, 0.16, 0.55);
+  box(boat, '#fff3d5', 0, 1.99, -0.34, 1.2, 0.62, 1.08);
+  box(boat, '#7cc6bd', 0, 2.05, 0.22, 0.78, 0.28, 0.06);
+  for (const side of [-1, 1]) {
+    box(boat, '#7cc6bd', side * 0.62, 2.04, -0.35, 0.065, 0.26, 0.43);
+    const roof = box(boat, patrol ? '#456d89' : '#ed9177', side * 0.36, 2.39, -0.34, 0.81, 0.11, 1.34);
+    roof.rotation.z = -side * 0.39;
+    for (const portholeZ of [-0.85, 0.75]) {
+      const porthole = new THREE.Mesh(new THREE.CircleGeometry(0.13, 9), new THREE.MeshBasicMaterial({ color: '#8bdbd4', side: THREE.DoubleSide }));
+      porthole.rotation.y = Math.PI / 2; porthole.position.set(side * 1.37, 1.26, portholeZ); boat.add(porthole);
+      const rim = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.035, 4, 10), mat('#ffe2a0'));
+      rim.rotation.y = Math.PI / 2; rim.position.set(side * 1.38, 1.26, portholeZ); boat.add(rim);
+    }
+  }
+  cylinder(boat, patrol ? '#e9f5ef' : '#fff5da', 0, 1.79, 1.48, 0.12, 0.16);
+  cylinder(boat, '#566976', 0, 1.79, -2.0, 0.23, 0.25);
   if (patrol) {
-    cylinder(boat, '#ffe36b', 0, 2.25, -0.88, 0.18, 0.1);
-    box(boat, '#fef3d9', 0, 2.38, -0.88, 0.55, 0.07, 0.08);
+    cylinder(boat, '#ffe36b', 0, 2.64, -0.38, 0.2, 0.13);
+    cone(boat, '#ffedab', 0, 2.77, -0.38, 0.14, 0.15, 6);
   } else {
     const crateColors = ['#ffd95d', '#f49d77', '#8ed6ad'];
     crateColors.forEach((c, i) => {
-      box(boat, c, i % 2 ? 0.42 : -0.42, 1.91 + (i === 2 ? 0.3 : 0), i === 2 ? -1.55 : -1.52, 0.72, 0.58, 0.58);
-      box(boat, '#9a764e', i % 2 ? 0.42 : -0.42, 1.93 + (i === 2 ? 0.3 : 0), i === 2 ? -1.52 : -1.49, 0.07, 0.6, 0.65);
+      box(boat, c, i % 2 ? 0.4 : -0.4, 1.99 + (i === 2 ? 0.24 : 0), i === 2 ? -1.42 : -1.48, 0.62, 0.45, 0.53);
+      box(boat, '#9a764e', i % 2 ? 0.4 : -0.4, 2.01 + (i === 2 ? 0.24 : 0), i === 2 ? -1.42 : -1.48, 0.055, 0.47, 0.56);
     });
-    cylinder(boat, '#f5f3d9', 0, 2.02, 0.57, 0.16, 0.18);
-    cone(boat, '#ffce5c', 0, 2.35, 0.57, 0.27, 0.42, 5);
+    cylinder(boat, '#f5f3d9', 0, 1.9, 1.37, 0.15, 0.22);
+    cone(boat, '#ffce5c', 0, 2.19, 1.37, 0.25, 0.35, 5);
   }
   return boat;
 }
@@ -98,17 +117,18 @@ function makeHarbour(parent: THREE.Object3D, z: number, destination = false): vo
   parent.add(harbour);
 }
 
-function makeFish(color: string): THREE.Group {
+function makeFish(color: string): { group: THREE.Group; tail: THREE.Group } {
   const fish = new THREE.Group();
   const body = new THREE.Mesh(new THREE.IcosahedronGeometry(0.48, 0), mat(color));
   body.scale.set(0.72, 0.4, 1.2); body.position.y = 0.18; fish.add(body);
-  const tail = cone(fish, color, 0, 0.18, -0.67, 0.3, 0.48, 3); tail.rotation.x = -Math.PI / 2;
+  const tail = new THREE.Group(); tail.position.set(0, 0.18, -0.49); fish.add(tail);
+  const fin = cone(tail, color, 0, 0, -0.18, 0.34, 0.54, 3); fin.rotation.x = -Math.PI / 2;
   cone(fish, '#f8df98', 0, 0.47, 0.03, 0.15, 0.32, 3);
   for (const side of [-1, 1]) {
     const eye = new THREE.Mesh(new THREE.SphereGeometry(0.045, 5, 4), mat('#183f4e'));
     eye.position.set(side * 0.28, 0.27, 0.31); fish.add(eye);
   }
-  return fish;
+  return { group: fish, tail };
 }
 
 function makeTurtle(): THREE.Group {
@@ -170,7 +190,7 @@ export class World {
   private readonly splashDrops: Array<{ mesh: THREE.Mesh; vx: number; vy: number; vz: number }> = [];
   private readonly wakes: THREE.Mesh[] = [];
   private readonly waterMarks: THREE.Group[] = [];
-  private readonly fishSchools: Array<{ group: THREE.Group; baseX: number; baseZ: number; phase: number }> = [];
+  private readonly fishSchools: Array<{ group: THREE.Group; baseX: number; baseZ: number; phase: number; swimmers: Array<{ fish: THREE.Group; tail: THREE.Group; phase: number }>; ripple: THREE.Mesh }> = [];
   private readonly turtles: Array<{ group: THREE.Group; baseX: number; baseZ: number; phase: number }> = [];
   private readonly gulls: Array<{ group: THREE.Group; wings: THREE.Mesh[]; baseX: number; baseZ: number; phase: number }> = [];
   private heading = 0;
@@ -196,6 +216,7 @@ export class World {
     sun.shadow.camera.top = 28; sun.shadow.camera.bottom = -28; sun.shadow.bias = -0.0006;
     this.scene.add(sun); this.scene.add(sun.target);
     const water = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false,
       uniforms: {
         uTime: { value: 0 }, uDeep: { value: new THREE.Color('#087f94') },
         uLight: { value: new THREE.Color('#2ba9b1') }, uFoam: { value: new THREE.Color('#a1e6dc') },
@@ -215,7 +236,7 @@ export class World {
           float shade = clamp(0.48 + broad * 0.16 + cross * 0.11 + chop * 0.035, 0.0, 1.0);
           float glint = smoothstep(0.79, 0.98, 0.5 + broad * 0.23 + cross * 0.24);
           vec3 color = mix(uDeep, uLight, shade) + uFoam * glint * 0.055;
-          gl_FragColor = vec4(color, 1.0);
+          gl_FragColor = vec4(color, 0.64);
           #include <colorspace_fragment>
         }`,
     });
@@ -318,12 +339,16 @@ export class World {
       const baseZ = 18 + i * 52;
       const baseX = i % 2 ? -6.3 : 6.2;
       const school = new THREE.Group();
+      const swimmers: Array<{ fish: THREE.Group; tail: THREE.Group; phase: number }> = [];
       for (let j = 0; j < 4; j++) {
-        const fish = makeFish(colors[(i + j) % colors.length]);
+        const { group: fish, tail } = makeFish(colors[(i + j) % colors.length]);
         fish.position.set((j % 2) * 0.8, 0, Math.floor(j / 2) * 1.15);
         fish.scale.setScalar(0.8 + (j % 2) * 0.18); school.add(fish);
+        swimmers.push({ fish, tail, phase: j * 1.4 + i * 0.3 });
       }
-      this.route.add(school); this.fishSchools.push({ group: school, baseX, baseZ, phase: i * 1.47 });
+      const ripple = new THREE.Mesh(new THREE.RingGeometry(0.8, 0.87, 20), new THREE.MeshBasicMaterial({ color: '#c6ece5', side: THREE.DoubleSide, transparent: true, opacity: 0.13, depthWrite: false }));
+      ripple.rotation.x = -Math.PI / 2; this.route.add(ripple);
+      this.route.add(school); this.fishSchools.push({ group: school, baseX, baseZ, phase: i * 1.47, swimmers, ripple });
     }
     for (let i = 0; i < 6; i++) {
       const turtle = makeTurtle(); this.route.add(turtle);
@@ -398,9 +423,19 @@ export class World {
       if (mark.position.z > 540) mark.position.z = -20;
       mark.position.x += Math.sin(this.elapsed * 0.7 + i) * dt * 0.035;
     });
-    this.fishSchools.forEach(({ group, baseX, baseZ, phase }) => {
-      group.position.set(baseX + Math.sin(this.elapsed * 0.68 + phase) * 1.75, Math.sin(this.elapsed * 2 + phase) * 0.09, baseZ + Math.cos(this.elapsed * 0.45 + phase) * 3.6);
-      group.rotation.y = Math.sin(this.elapsed * 0.62 + phase) * 0.55;
+    this.fishSchools.forEach(({ group, baseX, baseZ, phase, swimmers, ripple }) => {
+      const swimTime = this.elapsed * 0.62 + phase;
+      const swimX = baseX + Math.sin(swimTime) * 2.2;
+      const swimZ = baseZ + Math.cos(swimTime) * 3.2;
+      group.position.set(swimX, -0.68 + Math.sin(this.elapsed * 1.8 + phase) * 0.035, swimZ);
+      group.rotation.y = Math.atan2(Math.cos(swimTime) * 2.2, -Math.sin(swimTime) * 3.2);
+      swimmers.forEach(({ fish, tail, phase: fishPhase }) => {
+        tail.rotation.y = Math.sin(this.elapsed * 9 + fishPhase) * 0.52;
+        fish.position.y = Math.sin(this.elapsed * 3.4 + fishPhase) * 0.035;
+        fish.rotation.y = Math.sin(this.elapsed * 9 + fishPhase) * 0.06;
+      });
+      ripple.position.set(swimX, this.waterHeight(swimX, swimZ) + 0.055, swimZ);
+      ripple.scale.setScalar(1.05 + Math.sin(this.elapsed * 3 + phase) * 0.1);
     });
     this.turtles.forEach(({ group, baseX, baseZ, phase }) => {
       group.position.set(baseX + Math.sin(this.elapsed * 0.35 + phase) * 1.1, Math.sin(this.elapsed * 1.1 + phase) * 0.05, baseZ + Math.cos(this.elapsed * 0.3 + phase) * 2.3);
