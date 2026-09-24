@@ -295,9 +295,9 @@ function harborMiniRoute(index: number): string {
   const plan = levelPlan(1, index);
   const points = Array.from({ length: 13 }, (_, i) => {
     const z = i * ROUTE_END / 12;
-    return `${(50 + channelCenter(plan, z) * 1.5).toFixed(1)},${(43 - i * 3.3).toFixed(1)}`;
+    return `${(50 + channelCenter(plan, z) * 1.5).toFixed(1)},${(92 - i * 7).toFixed(1)}`;
   }).join(' ');
-  return `<svg class="map-mini-route" viewBox="0 0 100 50" preserveAspectRatio="none" aria-hidden="true"><polyline points="${points}" fill="none" stroke="#fff8df" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" opacity=".84"/><polyline points="${points}" fill="none" stroke="#398b94" stroke-width="2" stroke-dasharray="2 3"/><circle cx="50" cy="43" r="3" fill="#f8ce6a"/><circle cx="${(50 + channelCenter(plan, ROUTE_END) * 1.5).toFixed(1)}" cy="3.4" r="3" fill="#f78c70"/></svg>`;
+  return `<svg class="map-mini-route" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polyline points="${points}" fill="none" stroke="#fff8df" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" opacity=".84"/><polyline points="${points}" fill="none" stroke="#398b94" stroke-width="2" stroke-dasharray="2 3"/><circle cx="50" cy="92" r="3" fill="#f8ce6a"/><circle cx="${(50 + channelCenter(plan, ROUTE_END) * 1.5).toFixed(1)}" cy="8" r="3" fill="#f78c70"/></svg>`;
 }
 
 function renderMap(): void {

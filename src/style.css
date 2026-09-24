@@ -409,7 +409,7 @@ button:active:not(:disabled) { transform: translateY(2px); }
 .map-island { margin: 0 auto 4px; }
 .map-stop-body { display: flex; flex-direction: column; flex: 1; }
 .map-stop-body p { min-height: 25px; }
-.map-mini { position: relative; height: 50px; margin: 2px 0 9px; overflow: hidden; border-radius: 8px; border: 1px solid rgba(27,102,113,.36); background: linear-gradient(90deg, var(--harbor-color) 0 25%, #6cb6ba 27% 73%, var(--harbor-color) 75%); }
+.map-mini { position: relative; height: 112px; flex: none; margin: 2px 0 9px; overflow: hidden; border-radius: 8px; border: 1px solid rgba(27,102,113,.36); background: linear-gradient(90deg, var(--harbor-color) 0 25%, #6cb6ba 27% 73%, var(--harbor-color) 75%); }
 .map-mini-route { display: block; width: 100%; height: 100%; }
 .map-mini span { position: absolute; right: 3px; bottom: 2px; padding: 2px 3px; border-radius: 3px; background: #fff8db; color: #37636b; font: 900 7px ui-monospace, monospace; letter-spacing: .02em; }
 .map-stop-body > small { min-height: 0; margin-top: auto; }
@@ -445,7 +445,7 @@ button:active:not(:disabled) { transform: translateY(2px); }
   .map-stop { display: grid; grid-template-columns: 55px 1fr; gap: 5px; min-height: 0; }
   .map-island { align-self: center; width: 43px; height: 42px; margin: 0; }
   .map-stop small { min-height: 0; }
-  .map-mini { height: 42px; }
+  .map-mini { height: 96px; }
   .yard-destinations { grid-template-columns: 1fr; }
 }
 .port-map-link { margin-left: auto; flex: none; border: 0; background: transparent; color: #226e68; padding: 5px; font: 900 10px ui-monospace, monospace; text-decoration: underline; text-underline-offset: 3px; }
