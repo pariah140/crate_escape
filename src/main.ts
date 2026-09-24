@@ -2,7 +2,7 @@ import './style.css';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Share } from '@capacitor/share';
 import { World } from './world';
-import { advanceMotion, clampSailingPoint } from './piloting';
+import { advanceMotion } from './piloting';
 import {
   BOATS, PORTS, SHAPE_NAMES, canFitAll, canPlace, jobById, jobsForPort,
   loadSave, occupiedCells, persist, rotatedCells,
@@ -19,6 +19,7 @@ app.innerHTML = `<div class="game-shell">
   <div id="damage-callout" class="damage-callout" role="status" aria-live="polite"></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </div>`;
+const gameShell = app.querySelector<HTMLElement>('.game-shell')!;
 
 const sceneHost = document.querySelector<HTMLElement>('#scene')!;
 const view = document.querySelector<HTMLElement>('#view')!;
@@ -178,8 +179,7 @@ function renderPack(): void {
 function renderRun(): void {
   view.innerHTML = `<main class="run-overlay" aria-label="Boat run">
     <div class="run-top"><div class="run-stat"><span>ROUTE</span><strong id="route-progress">0%</strong><div class="meter"><i id="route-fill"></i></div></div><div class="run-stat"><span>HULL</span><strong id="hull-number">100%</strong><div class="meter"><i id="hull-fill"></i></div></div><div class="run-stat heat-stat"><span>HEAT</span><strong id="heat-number">LOW</strong><div class="meter"><i id="heat-fill"></i></div></div></div>
-    <div class="run-bottom"><div class="run-instruction"><strong>DRAG TO PILOT</strong><span>Tap a spot or drag · release to coast</span></div><div id="run-timer" class="run-timer">00:00</div></div>
-    <div id="steer-zone" class="steer-zone" aria-label="Tap or drag on the water to pilot the boat"></div>
+    <div class="run-bottom"><div class="run-instruction"><strong id="run-instruction-title">DRAG TO PILOT</strong><span id="run-instruction-detail">Tap a spot or drag · release to coast</span></div><div id="run-timer" class="run-timer">00:00</div></div>
   </main>`;
   updateHud();
 }
@@ -215,6 +215,8 @@ function renderYard(): void {
 }
 
 function render(): void {
+  if (phase !== 'run' && phase !== 'result') world.resetVoyage();
+  gameShell.classList.toggle('is-running', phase === 'run');
   updateChrome();
   if (phase === 'board') renderBoard();
   if (phase === 'pack') renderPack();
@@ -253,6 +255,7 @@ function placeAt(x: number, y: number): void {
 
 function beginRun(): void {
   if (!pieces.length || pieces.some(piece => piece.x === null)) return;
+  world.resetVoyage();
   const maxHull = boat().hull + save.upgrades.hull * 15;
   const patrolHeat = jobs.reduce((sum, job) => sum + job.heat, 0);
   const hotCargo = jobs.some(job => job.kind === 'hot');
@@ -300,19 +303,35 @@ function showImpact(label: string): void {
   damageFlashEl.classList.add('active'); damageCalloutEl.classList.add('active');
 }
 
+function beginDeliveryDocking(): void {
+  if (!run || run.ending) return;
+  run.ending = true; run.holding = false; run.pointer = null; run.tapTarget = null;
+  heldKeys.clear(); sceneHost.classList.remove('steering'); gameShell.classList.remove('is-running');
+  const approach = world.beginDocking(run.x, run.z);
+  document.getElementById('run-instruction-title')!.textContent = 'DOCKING AT THE PIER';
+  document.getElementById('run-instruction-detail')!.textContent = 'Ease in and tie up alongside';
+  window.setTimeout(() => {
+    if (phase !== 'run' || !run?.ending) return;
+    document.getElementById('run-instruction-title')!.textContent = 'UNLOADING CARGO';
+    document.getElementById('run-instruction-detail')!.textContent = 'Crates ashore · delivery complete';
+  }, approach * 1000);
+  window.setTimeout(() => {
+    if (phase === 'run' && run?.ending) endRun(true, 'delivered');
+  }, (approach + 3.35) * 1000);
+}
+
 function steeringPoint(clientX: number, clientY: number): { x: number; z: number } {
-  const point = world.screenToWater(clientX, clientY);
-  return clampSailingPoint(point);
+  return world.screenToWater(clientX, clientY);
 }
 
 function dragPoint(): { x: number; z: number } | null {
   if (!run?.holding || !run.pointerMoved) return null;
   const start = world.screenToWater(run.pointerStartX, run.pointerStartY);
   const current = world.screenToWater(run.pointerX, run.pointerY);
-  return clampSailingPoint({
+  return {
     x: run.dragOriginX + current.x - start.x,
     z: run.dragOriginZ + current.z - start.z,
-  });
+  };
 }
 
 function updateRun(dt: number): void {
@@ -362,7 +381,7 @@ function updateRun(dt: number): void {
       if (run.hull <= 0) { run.ending = true; window.setTimeout(() => endRun(false, 'sunk'), 650); return; }
     }
   }
-  if (run.z >= 520) { endRun(true, 'delivered'); return; }
+  if (run.z >= 520) { beginDeliveryDocking(); return; }
   if (performance.now() - lastHud > 90) { updateHud(); lastHud = performance.now(); }
 }
 
@@ -404,7 +423,12 @@ view.addEventListener('click', event => {
 view.addEventListener('pointerdown', event => {
   const target = (event.target as HTMLElement).closest<HTMLElement>('[data-action="select-piece"]');
   if (phase === 'pack' && target) { dragPiece = target.dataset.id!; dragMoved = false; }
-  if (phase === 'run' && (event.target as HTMLElement).closest('.steer-zone') && run) {
+});
+
+window.addEventListener('pointerdown', event => {
+  if (phase === 'run' && run && !run.ending && run.pointer === null && event.isPrimary && event.button === 0
+    && !(event.target as HTMLElement).closest('button, a, input, select, textarea')) {
+    event.preventDefault();
     run.pointer = event.pointerId; run.holding = true; run.tapTarget = null;
     run.pointerX = event.clientX; run.pointerY = event.clientY;
     run.pointerStartX = event.clientX; run.pointerStartY = event.clientY;
@@ -412,7 +436,7 @@ view.addEventListener('pointerdown', event => {
     run.dragOriginX = run.x; run.dragOriginZ = run.z;
     sceneHost.classList.add('steering');
   }
-});
+}, { capture: true });
 
 window.addEventListener('pointermove', event => {
   if (phase === 'run' && run?.pointer === event.pointerId) {

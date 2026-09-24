@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { patrolPose } from './patrols';
 
 const mat = (color: string, roughness = 0.85) => new THREE.MeshStandardMaterial({ color, roughness, flatShading: true });
 const palette = {
@@ -58,9 +59,13 @@ function makeBoat(color: string, patrol = false): THREE.Group {
     cone(boat, '#ffedab', 0, 2.77, -0.38, 0.14, 0.15, 6);
   } else {
     const crateColors = ['#ffd95d', '#f49d77', '#8ed6ad'];
+    const cargo = new THREE.Group(); cargo.name = 'deck-cargo'; boat.add(cargo);
     crateColors.forEach((c, i) => {
-      box(boat, c, i % 2 ? 0.4 : -0.4, 1.99 + (i === 2 ? 0.24 : 0), i === 2 ? -1.42 : -1.48, 0.62, 0.45, 0.53);
-      box(boat, '#9a764e', i % 2 ? 0.4 : -0.4, 2.01 + (i === 2 ? 0.24 : 0), i === 2 ? -1.42 : -1.48, 0.055, 0.47, 0.56);
+      const parcel = new THREE.Group();
+      parcel.position.set(i % 2 ? 0.4 : -0.4, 1.99 + (i === 2 ? 0.24 : 0), i === 2 ? -1.42 : -1.48);
+      box(parcel, c, 0, 0, 0, 0.62, 0.45, 0.53);
+      box(parcel, '#9a764e', 0, 0.02, 0, 0.055, 0.47, 0.56);
+      cargo.add(parcel);
     });
     cylinder(boat, '#f5f3d9', 0, 1.9, 1.37, 0.15, 0.22);
     cone(boat, '#ffce5c', 0, 2.19, 1.37, 0.25, 0.35, 5);
@@ -181,7 +186,9 @@ function makeHullFoam(width: number, length: number): THREE.Mesh {
 }
 
 export interface Hazard { x: number; z: number; radius: number; kind: 'rock' | 'buoy'; mesh: THREE.Group; }
-export interface Patrol { x: number; z: number; baseX: number; phase: number; mesh: THREE.Group; light: THREE.Mesh; foam: THREE.Mesh; wake: THREE.Mesh; }
+export interface Patrol { x: number; z: number; baseX: number; baseZ: number; phase: number; heading: number; chase: number; mesh: THREE.Group; light: THREE.Mesh; foam: THREE.Mesh; wake: THREE.Mesh; }
+interface DockParcel { mesh: THREE.Object3D; start: THREE.Vector3; end: THREE.Vector3; launch: number }
+interface Docking { fromX: number; fromZ: number; time: number; approach: number; parcels: Array<DockParcel | null> }
 
 export class World {
   readonly renderer: THREE.WebGLRenderer;
@@ -206,6 +213,9 @@ export class World {
   private readonly fishSchools: Array<{ group: THREE.Group; baseX: number; baseZ: number; phase: number; swimmers: Array<{ fish: THREE.Group; tail: THREE.Group; phase: number }> }> = [];
   private readonly turtles: Array<{ group: THREE.Group; flippers: THREE.Mesh[]; baseX: number; baseZ: number; phase: number }> = [];
   private readonly gulls: Array<{ group: THREE.Group; wings: THREE.Mesh[]; baseX: number; baseZ: number; phase: number }> = [];
+  private readonly dockSparkles: Array<{ mesh: THREE.Mesh; vx: number; vy: number; vz: number }> = [];
+  private readonly mooringLine: THREE.Line;
+  private docking: Docking | null = null;
   private heading = 0;
   private damageTime = 0;
   private elapsed = 0;
@@ -277,7 +287,7 @@ export class World {
           #include <colorspace_fragment>
         }`,
     });
-    this.ocean = new THREE.Mesh(new THREE.PlaneGeometry(130, 1150, 30, 170), water);
+    this.ocean = new THREE.Mesh(new THREE.PlaneGeometry(220, 4000, 44, 500), water);
     this.ocean.rotation.x = -Math.PI / 2; this.ocean.position.set(0, -0.04, 260);
     this.ocean.renderOrder = -1; this.scene.add(this.ocean);
     this.scene.add(this.route); this.scene.add(this.boat);
@@ -305,6 +315,20 @@ export class World {
       drop.visible = false; this.scene.add(drop);
       this.splashDrops.push({ mesh: drop, vx: Math.cos(i * Math.PI / 5) * (2.6 + (i % 3)), vy: 2.7 + (i % 4) * 0.6, vz: Math.sin(i * Math.PI / 5) * (2.6 + (i % 3)) });
     }
+    for (let i = 0; i < 18; i++) {
+      const sparkle = new THREE.Mesh(
+        new THREE.TetrahedronGeometry(0.19 + (i % 3) * 0.045),
+        new THREE.MeshBasicMaterial({ color: ['#ffe27d', '#ff9b79', '#9ae2bf', '#fff5da'][i % 4], transparent: true, opacity: 0, depthWrite: false }),
+      );
+      sparkle.visible = false; this.scene.add(sparkle);
+      const angle = i * Math.PI * 2 / 18;
+      this.dockSparkles.push({ mesh: sparkle, vx: Math.cos(angle) * (1.5 + i % 3), vy: 2.8 + i % 4 * 0.35, vz: Math.sin(angle) * (1.5 + i % 4) });
+    }
+    this.mooringLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+      new THREE.LineBasicMaterial({ color: '#fff1bd', transparent: true, opacity: 0.9 }),
+    );
+    this.mooringLine.visible = false; this.scene.add(this.mooringLine);
     for (let i = 0; i < 24; i++) {
       const wake = new THREE.Mesh(
         new THREE.RingGeometry(0.86, 1, 28, 1, 0.1, Math.PI - 0.2),
@@ -320,6 +344,21 @@ export class World {
   setBoatColor(color: string): void {
     const hull = this.boat.children[0] as THREE.Mesh;
     (hull.material as THREE.MeshStandardMaterial).color.set(color);
+  }
+
+  resetVoyage(): void {
+    this.docking?.parcels.forEach(parcel => { if (parcel) this.scene.remove(parcel.mesh); });
+    this.docking = null;
+    this.heading = 0;
+    this.boat.getObjectByName('deck-cargo')?.children.forEach(parcel => { parcel.visible = true; });
+    this.dockSparkles.forEach(({ mesh }) => { mesh.visible = false; });
+    this.mooringLine.visible = false;
+  }
+
+  beginDocking(x: number, z: number): number {
+    const approach = Math.max(2.2, Math.hypot(x + 1.8, z - 532) / 10.5);
+    this.docking = { fromX: x, fromZ: z, time: 0, approach, parcels: [null, null, null] };
+    return approach;
   }
 
   screenToWater(clientX: number, clientY: number): { x: number; z: number } {
@@ -357,7 +396,8 @@ export class World {
     for (let i = 0; i < 6; i++) {
       const z = 55 + i * 78;
       const x = i % 2 ? -4 : 4;
-      const mesh = makeBoat('#527798', true); mesh.scale.setScalar(0.72); mesh.position.set(x, -0.68, z); mesh.rotation.y = Math.PI; this.route.add(mesh);
+      const initial = patrolPose(i, 0, x, z, i * 1.8);
+      const mesh = makeBoat('#527798', true); mesh.scale.setScalar(0.72); mesh.position.set(initial.x, -0.68, initial.z); mesh.rotation.y = initial.heading; this.route.add(mesh);
       const foam = makeHullFoam(1.22, 1.86); foam.position.set(x, 0.04, z); this.route.add(foam);
       const wake = new THREE.Mesh(
         new THREE.TorusGeometry(0.58, 0.045, 3, 10, Math.PI),
@@ -366,7 +406,7 @@ export class World {
       wake.rotation.x = -Math.PI / 2; wake.position.set(x, 0.05, z + 2); this.route.add(wake);
       const light = new THREE.Mesh(new THREE.ConeGeometry(3.6, 9, 18, 1, true), new THREE.MeshBasicMaterial({ color: '#fff1a0', transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide }));
       light.rotation.x = Math.PI / 2; light.position.set(0, 1.2, -5); mesh.add(light);
-      this.patrols.push({ x, z, baseX: x, phase: i * 1.8, mesh, light, foam, wake });
+      this.patrols.push({ x: initial.x, z: initial.z, baseX: x, baseZ: z, phase: i * 1.8, heading: initial.heading, chase: 0, mesh, light, foam, wake });
     }
     // Small moving glints add texture without a remote water asset.
     this.waterMarks.forEach(mark => this.scene.remove(mark)); this.waterMarks.length = 0;
@@ -414,14 +454,29 @@ export class World {
 
   private waterHeight(x: number, z: number): number {
     // Keep the hull and foam in phase with the ocean vertex shader.
-    return -0.04 + Math.sin(x * 0.42 + this.elapsed * 1.1) * 0.08
+    const localX = x - this.ocean.position.x;
+    return -0.04 + Math.sin(localX * 0.42 + this.elapsed * 1.1) * 0.08
       + Math.sin((260 - z) * 0.25 - this.elapsed * 0.85) * 0.06
-      + Math.sin(x * 0.9 + (260 - z) * 0.47 + this.elapsed * 1.55) * 0.035;
+      + Math.sin(localX * 0.9 + (260 - z) * 0.47 + this.elapsed * 1.55) * 0.035;
   }
 
   update(dt: number, running: boolean, x: number, z: number, heat: number, boatSpeed: number, vx = 0, vz = 0, target: { x: number; z: number } | null = null): void {
     this.elapsed += dt;
     (this.ocean.material as THREE.ShaderMaterial).uniforms.uTime.value = this.elapsed;
+    if (this.docking) {
+      this.docking.time += dt;
+      const progress = Math.min(1, this.docking.time / this.docking.approach);
+      const eased = progress * progress * (3 - 2 * progress);
+      const rate = 6 * progress * (1 - progress) / this.docking.approach;
+      x = this.docking.fromX + (-1.8 - this.docking.fromX) * eased;
+      z = this.docking.fromZ + (532 - this.docking.fromZ) * eased;
+      vx = (-1.8 - this.docking.fromX) * rate;
+      vz = (532 - this.docking.fromZ) * rate;
+      boatSpeed = Math.hypot(vx, vz);
+      target = null;
+      running = true;
+    }
+    this.ocean.position.x = x;
     if (running && boatSpeed > 0.3) {
       const targetHeading = Math.atan2(vx, vz);
       const difference = Math.atan2(Math.sin(targetHeading - this.heading), Math.cos(targetHeading - this.heading));
@@ -435,6 +490,49 @@ export class World {
       this.heading,
       Math.sin(this.elapsed * 2.1 + x * 0.3) * 0.045 - vx * 0.007 + (this.damageTime > 0 ? Math.sin(this.elapsed * 46) * this.damageTime * 0.17 : 0),
     );
+    if (this.docking) {
+      this.boat.updateMatrixWorld(true);
+      const cargo = this.boat.getObjectByName('deck-cargo') as THREE.Group;
+      cargo.children.forEach((parcel, i) => {
+        const launch = this.docking!.approach + 0.18 + i * 0.54;
+        if (this.docking!.time >= launch && !this.docking!.parcels[i]) {
+          const start = parcel.getWorldPosition(new THREE.Vector3());
+          const clone = parcel.clone(true);
+          clone.position.copy(start);
+          clone.rotation.y = this.heading;
+          this.scene.add(clone);
+          parcel.visible = false;
+          this.docking!.parcels[i] = {
+            mesh: clone, start, launch,
+            end: new THREE.Vector3(-7.2 + (i % 2) * 0.8, i === 2 ? 1.54 : 1.08, 535 + (i === 1 ? 0.55 : 0)),
+          };
+        }
+      });
+      this.docking.parcels.forEach(parcel => {
+        if (!parcel) return;
+        const t = Math.min(1, (this.docking!.time - parcel.launch) / 0.84);
+        const eased = t * t * (3 - 2 * t);
+        parcel.mesh.position.copy(parcel.start).lerp(parcel.end, eased);
+        parcel.mesh.position.y += Math.sin(Math.PI * t) * 1.8;
+        parcel.mesh.rotation.z = Math.sin(Math.PI * t) * 0.2;
+        parcel.mesh.scale.setScalar(1.42 + Math.sin(Math.PI * Math.max(0, t - 0.74) / 0.26) * 0.09);
+      });
+      this.mooringLine.visible = this.docking.time > this.docking.approach + 0.15;
+      if (this.mooringLine.visible) {
+        const line = this.mooringLine.geometry.getAttribute('position') as THREE.BufferAttribute;
+        line.setXYZ(0, x - 1.15, surface + 0.85, z + 0.65);
+        line.setXYZ(1, -4.3, 0.95, 534.3);
+        line.needsUpdate = true;
+      }
+      const burstAge = this.docking.time - (this.docking.approach + 2.0);
+      this.dockSparkles.forEach(({ mesh, vx: sparkleVx, vy, vz: sparkleVz }) => {
+        mesh.visible = burstAge >= 0 && burstAge < 1.25;
+        if (!mesh.visible) return;
+        mesh.position.set(-7.0 + sparkleVx * burstAge, 1.5 + vy * burstAge - 3.5 * burstAge * burstAge, 535 + sparkleVz * burstAge);
+        mesh.rotation.set(burstAge * 6, burstAge * 5, burstAge * 4);
+        (mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 1 - burstAge / 1.25);
+      });
+    }
     this.boatFoam.position.set(x, surface + 0.06, z);
     this.boatFoam.rotation.z = -this.heading;
     (this.boatFoam.material as THREE.MeshBasicMaterial).opacity = 0.35 + Math.min(boatSpeed / 9.2, 1) * 0.25 + Math.sin(this.elapsed * 4) * 0.04;
@@ -526,25 +624,40 @@ export class World {
       ((this.boat.children[0] as THREE.Mesh).material as THREE.MeshStandardMaterial).emissive.set('#000000');
     }
     this.patrols.forEach((patrol, i) => {
-      patrol.x = patrol.baseX + Math.sin(this.elapsed * (0.6 + i * 0.05) + patrol.phase) * 2.2;
-      const chasing = running && heat > 65 && z > patrol.z - 15 && z < patrol.z + 19;
-      if (chasing) patrol.x += (x - patrol.x) * 0.55;
-      patrol.mesh.position.x = patrol.x;
-      patrol.mesh.position.z = chasing ? Math.max(patrol.z, z + 1.15) : patrol.z + Math.sin(this.elapsed * 0.8 + i) * 2;
+      const pose = patrolPose(i, this.elapsed, patrol.baseX, patrol.baseZ, patrol.phase);
+      const chasing = running && heat > 65 && z > patrol.baseZ - 15 && z < patrol.baseZ + 19
+        && Math.abs(x - pose.x) < 16;
+      patrol.chase += ((chasing ? 1 : 0) - patrol.chase) * Math.min(1, dt * 1.4);
+      const nextX = pose.x + (x - pose.x) * patrol.chase * 0.65;
+      const nextZ = pose.z + (z + 2 - pose.z) * patrol.chase * 0.65;
+      const travelX = nextX - patrol.x;
+      const travelZ = nextZ - patrol.z;
+      const targetHeading = Math.hypot(travelX, travelZ) > 0.002 ? Math.atan2(travelX, travelZ) : pose.heading;
+      const turn = Math.atan2(Math.sin(targetHeading - patrol.heading), Math.cos(targetHeading - patrol.heading));
+      patrol.heading += turn * Math.min(1, dt * 4);
+      patrol.x = nextX; patrol.z = nextZ;
+      patrol.mesh.position.x = nextX;
+      patrol.mesh.position.z = nextZ;
       const patrolSurface = this.waterHeight(patrol.mesh.position.x, patrol.mesh.position.z);
       patrol.mesh.position.y = patrolSurface - 0.68 + Math.sin(this.elapsed * 2 + patrol.phase) * 0.02;
       patrol.mesh.rotation.x = Math.sin(this.elapsed * 1.7 + patrol.phase) * 0.024;
+      patrol.mesh.rotation.y = patrol.heading;
       patrol.mesh.rotation.z = Math.sin(this.elapsed * 2.1 + patrol.phase) * 0.035;
       patrol.foam.position.set(patrol.mesh.position.x, patrolSurface + 0.055, patrol.mesh.position.z);
+      patrol.foam.rotation.z = -patrol.heading;
       (patrol.foam.material as THREE.MeshBasicMaterial).opacity = 0.38 + Math.sin(this.elapsed * 3.3 + patrol.phase) * 0.06;
-      const wakeZ = patrol.mesh.position.z + 2;
-      patrol.wake.position.set(patrol.x, this.waterHeight(patrol.x, wakeZ) + 0.06, wakeZ);
+      const wakeX = patrol.x - Math.sin(patrol.heading) * 2;
+      const wakeZ = patrol.z - Math.cos(patrol.heading) * 2;
+      patrol.wake.position.set(wakeX, this.waterHeight(wakeX, wakeZ) + 0.06, wakeZ);
+      patrol.wake.rotation.z = Math.PI - patrol.heading;
       (patrol.light.material as THREE.MeshBasicMaterial).opacity = 0.12 + Math.sin(this.elapsed * 2 + i) * 0.03;
     });
     const narrow = this.width < 720;
-    const targetZ = running ? z + (narrow ? 8 : 14) : -7;
-    const targetX = running ? x * 0.5 : 0;
+    const targetZ = this.docking ? z + (narrow ? 3 : 5) : running ? z + (narrow ? 8 : 14) : -7;
+    const targetX = this.docking ? x - 2.8 : running ? x : 0;
     const factor = Math.min(1, dt * 2.5);
+    this.camera.zoom += ((this.docking ? 1.42 : 1) - this.camera.zoom) * factor;
+    this.camera.updateProjectionMatrix();
     this.camera.position.lerp(new THREE.Vector3(targetX + (narrow ? 6 : 16), 31, targetZ - (narrow ? 25 : 28)), factor);
     this.camera.lookAt(targetX, 0, targetZ + (narrow ? 2 : 5));
     if (this.damageTime > 0) this.camera.position.x += Math.sin(this.elapsed * 63) * this.damageTime * 0.08;

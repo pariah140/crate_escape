@@ -45,6 +45,10 @@ Rounded Trebuchet gives the title a toy-box voice while keeping buttons legible.
 
 On phones, the scene fills the viewport and the current task sits in a scrollable bottom panel. On wider screens, the scene remains prominent and the task panel sits to the right. The HUD stays visible during runs.
 
+## Sailing motion
+
+During a run, open screen space steers directly to the tapped water point; dragging moves the target, and release preserves a little boat inertia. The camera follows the boat beyond the central route. Patrol boats travel through varied turns and loops. A successful run ends with a close view of the boat docking and cargo crossing onto the pier before the result appears.
+
 ## Elevation & Depth
 
 The 3D world uses simple directional shadows and layered pastel landforms. UI panels use one dark offset shadow; avoid glass blur and translucent text surfaces.

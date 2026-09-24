@@ -1,13 +1,5 @@
 export interface Point { x: number; z: number }
 export interface Motion extends Point { vx: number; vz: number }
-export const SAILING_BOUNDS = { minX: -11.5, maxX: 11.5, minZ: -8, maxZ: 520 } as const;
-
-export function clampSailingPoint(point: Point): Point {
-  return {
-    x: Math.max(SAILING_BOUNDS.minX, Math.min(SAILING_BOUNDS.maxX, point.x)),
-    z: Math.max(SAILING_BOUNDS.minZ, Math.min(SAILING_BOUNDS.maxZ, point.z)),
-  };
-}
 
 export function advanceMotion(
   motion: Motion,
@@ -37,8 +29,7 @@ export function advanceMotion(
   let vz = motion.vz + (desiredVz - motion.vz) * Math.min(1, dt * response);
   if (Math.abs(vx) < 0.03) vx = 0;
   if (Math.abs(vz) < 0.03) vz = 0;
-  const { x, z } = clampSailingPoint({ x: motion.x + vx * dt, z: motion.z + vz * dt });
-  if (x === SAILING_BOUNDS.minX || x === SAILING_BOUNDS.maxX) vx = 0;
-  if (z === SAILING_BOUNDS.minZ || z === SAILING_BOUNDS.maxZ) vz = 0;
+  const x = motion.x + vx * dt;
+  const z = motion.z + vz * dt;
   return { x, z, vx, vz };
 }

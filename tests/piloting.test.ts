@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { advanceMotion, clampSailingPoint, SAILING_BOUNDS, type Motion } from '../src/piloting';
+import { advanceMotion, type Motion } from '../src/piloting';
 
 test('an untouched boat stays at the harbour', () => {
   let boat: Motion = { x: 0, z: 0, vx: 0, vz: 0 };
@@ -19,11 +19,9 @@ test('the boat lags behind a target, then coasts and comes to rest after release
   assert.equal(boat.vz, 0);
 });
 
-test('screen-edge targets steer across the wider channel and slightly behind the start', () => {
-  assert.deepEqual(clampSailingPoint({ x: -99, z: -99 }), { x: SAILING_BOUNDS.minX, z: SAILING_BOUNDS.minZ });
-  assert.deepEqual(clampSailingPoint({ x: 99, z: 99 }), { x: SAILING_BOUNDS.maxX, z: 99 });
+test('open-water targets are not clamped to the route', () => {
   let boat: Motion = { x: 0, z: 0, vx: 0, vz: 0 };
-  for (let i = 0; i < 180; i++) boat = advanceMotion(boat, { x: -11.5, z: -8 }, { x: 0, z: 0 }, 9.2, 1 / 60);
-  assert.ok(boat.x < -6.8);
+  for (let i = 0; i < 600; i++) boat = advanceMotion(boat, { x: -50, z: -30 }, { x: 0, z: 0 }, 9.2, 1 / 60);
+  assert.ok(boat.x < -40);
   assert.ok(boat.z < 0);
 });
