@@ -25,10 +25,10 @@ function cylinder(parent: THREE.Object3D, color: string, x: number, y: number, z
 
 function makeBoat(color: string, style: BoatStyle | 'patrol' = 'dinghy'): THREE.Group {
   const craft = new THREE.Group();
-  const broad = style === 'trawler' || style === 'freighter';
-  const long = style === 'cruiser' || style === 'freighter';
-  const half = style === 'dinghy' || style === 'patrol' ? 1.28 : style === 'speedboat' ? 1.12 : broad ? 1.65 : 1.4;
-  const front = style === 'speedboat' ? 2.9 : long ? 3.15 : 2.35;
+  const broad = ['trawler', 'freighter', 'catamaran', 'houseboat', 'barge'].includes(style);
+  const long = ['cruiser', 'freighter', 'clipper', 'barge'].includes(style);
+  const half = style === 'skiff' ? 0.92 : style === 'dinghy' || style === 'patrol' ? 1.28 : style === 'speedboat' ? 1.12 : style === 'barge' ? 1.92 : broad ? 1.65 : 1.4;
+  const front = style === 'speedboat' || style === 'skiff' ? 2.9 : long ? 3.15 : 2.35;
   const back = long ? -2.9 : -2.15;
   const outline = new THREE.Shape();
   outline.moveTo(0, front); outline.lineTo(-half * (style === 'speedboat' ? 0.94 : 0.72), front - 0.45);
@@ -43,10 +43,10 @@ function makeBoat(color: string, style: BoatStyle | 'patrol' = 'dinghy'): THREE.
   deck.rotation.x = -Math.PI / 2; deck.position.y = broad ? 1.82 : 1.61; deck.scale.set(0.83, 0.83, 1); craft.add(deck);
   const railPoints = [new THREE.Vector3(0, broad ? 1.9 : 1.68, front - 0.22), new THREE.Vector3(-half * .91, broad ? 1.9 : 1.68, front - 1.08), new THREE.Vector3(-half * .91, broad ? 1.9 : 1.68, back + .43), new THREE.Vector3(0, broad ? 1.9 : 1.68, back + .19), new THREE.Vector3(half * .91, broad ? 1.9 : 1.68, back + .43), new THREE.Vector3(half * .91, broad ? 1.9 : 1.68, front - 1.08)];
   craft.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(railPoints, true), 44, .06, 5, true), mat(style === 'patrol' ? '#dceef0' : '#ffe9ac')));
-  const cabinZ = style === 'freighter' ? back + 0.85 : style === 'trawler' ? 0.15 : style === 'speedboat' ? -0.6 : -0.34;
+  const cabinZ = style === 'freighter' || style === 'barge' ? back + 0.85 : style === 'trawler' || style === 'houseboat' ? 0.15 : style === 'speedboat' ? -0.6 : -0.34;
   const cabinY = broad ? 2.08 : 1.95;
-  const cabinW = style === 'freighter' ? 2.35 : style === 'trawler' ? 1.8 : style === 'cruiser' ? 1.9 : 1.18;
-  const cabinD = style === 'cruiser' ? 1.95 : style === 'freighter' ? 1.35 : style === 'trawler' ? 1.35 : 1.08;
+  const cabinW = style === 'freighter' || style === 'barge' ? 2.35 : style === 'trawler' || style === 'houseboat' ? 1.8 : style === 'cruiser' ? 1.9 : style === 'skiff' ? .75 : 1.18;
+  const cabinD = style === 'houseboat' ? 2.2 : style === 'cruiser' ? 1.95 : style === 'freighter' || style === 'barge' ? 1.35 : style === 'trawler' ? 1.35 : 1.08;
   box(craft, '#fff2d9', 0, cabinY, cabinZ, cabinW, style === 'freighter' ? 0.95 : 0.64, cabinD);
   box(craft, style === 'patrol' ? '#496e88' : style === 'cruiser' ? '#f9c8ae' : style === 'freighter' ? '#7f9db2' : '#e88470', 0, cabinY + (style === 'freighter' ? .57 : .39), cabinZ, cabinW + .18, .16, cabinD + .2);
   box(craft, '#83cbd0', 0, cabinY + .08, cabinZ + cabinD / 2 + .035, cabinW * .68, .28, .06);
@@ -70,6 +70,29 @@ function makeBoat(color: string, style: BoatStyle | 'patrol' = 'dinghy'): THREE.
   } else if (style === 'freighter') {
     for (const side of [-1, 1]) for (let i = 0; i < 2; i++) box(craft, ['#ecab76', '#8dcaaf', '#e7cf82', '#a8b1de'][(side + 1) + i], side * .72, 2.05 + i * .35, 1.3, 1.25, .33, 1.23);
     cylinder(craft, '#eef3dc', 0, 3.17, cabinZ, .085, 1.1);
+  } else if (style === 'skiff') {
+    box(craft, '#4c7389', 0, 1.13, back - .12, .6, .36, .32);
+    for (const side of [-1, 1]) box(craft, '#fff5d2', side * .55, 1.7, .72, .1, .1, 1.8);
+  } else if (style === 'catamaran') {
+    for (const side of [-1, 1]) {
+      const float = box(craft, '#f8e9ce', side * 1.36, .66, .15, .36, .42, 4.9);
+      float.rotation.y = side * .035;
+    }
+    box(craft, '#d3f0e6', 0, 2.52, cabinZ, 2.5, .13, 1.45);
+    for (const side of [-1, 1]) box(craft, '#f4ba7d', side * .94, 1.93, 1.12, .38, .22, 1.2);
+  } else if (style === 'houseboat') {
+    const roof = box(craft, '#e9846f', 0, 2.57, cabinZ, 2.35, .19, 2.75);
+    roof.rotation.z = -.07;
+    cylinder(craft, '#b57859', .65, 2.88, cabinZ - .55, .13, .68);
+    for (const side of [-1, 1]) box(craft, '#a4d6ae', side * .95, 1.85, 1.22, .27, .3, .55);
+  } else if (style === 'clipper') {
+    cylinder(craft, '#aa805b', 0, 3.34, -.65, .09, 2.7);
+    const sail = cone(craft, '#fff2d9', .47, 3.15, -.65, .86, 1.72, 3);
+    sail.rotation.z = -.35;
+    box(craft, '#e6c28c', 0, 1.71, 1.67, 1.05, .12, 1.5);
+  } else if (style === 'barge') {
+    for (const side of [-1, 1]) for (let i = 0; i < 3; i++) box(craft, ['#91bea7', '#e8b785', '#a5a8d1'][i], side * .83, 2.06, -.2 + i * .92, 1.37, .55, .79);
+    box(craft, '#6b895d', 0, 2.79, cabinZ, 2.44, .14, 1.58);
   } else {
     cylinder(craft, '#f5f3d9', 0, 1.8, 1.38, .15, .22);
     cone(craft, '#ffce5c', 0, 2.1, 1.38, .25, .35, 5);
@@ -358,7 +381,7 @@ export class World {
     this.scene.remove(this.boat);
     this.boat = makeBoat(craft.color, craft.style);
     this.scene.add(this.boat);
-    const size = craft.style === 'freighter' ? 1.42 : craft.style === 'cruiser' || craft.style === 'trawler' ? 1.22 : 1;
+    const size = craft.width >= 9 ? 1.55 : craft.width >= 8 ? 1.42 : craft.width >= 6 ? 1.22 : 1;
     this.boatFoam.scale.set(1.68 * size, 2.55 * size, 1);
   }
 
@@ -379,12 +402,16 @@ export class World {
     box(this.yard, '#95c9bb', -18, 2.1, -11.4, 2.7, 1.45, .12);
     box(this.yard, '#f5d7a0', 13, 1.25, -10.2, 4.5, .5, 3.2);
     for (const [slot, index] of owned.entries()) {
-      const def = BOATS[index]; const x = -23 + (slot - (owned.length - 1) / 2) * 7;
-      const model = makeBoat(def.color, def.style); model.position.set(x, -.35, -4.5); model.rotation.y = -.15; this.yard.add(model);
-      const foam = makeHullFoam(index >= 3 ? 2.4 : 1.8, index >= 3 ? 3.3 : 2.5); foam.position.set(x, .05, -4.5); this.yard.add(foam);
+      const def = BOATS[index];
+      const row = Math.floor(slot / 5), column = slot % 5;
+      const columns = Math.min(owned.length - row * 5, 5);
+      const x = -23 + (column - (columns - 1) / 2) * 7;
+      const z = -4.5 + row * 8;
+      const model = makeBoat(def.color, def.style); model.position.set(x, -.35, z); model.rotation.y = -.15; this.yard.add(model);
+      const foam = makeHullFoam(index >= 3 ? 2.4 : 1.8, index >= 3 ? 3.3 : 2.5); foam.position.set(x, .05, z); this.yard.add(foam);
       if (index === active) {
         const ring = new THREE.Mesh(new THREE.RingGeometry(3.25, 3.38, 32), new THREE.MeshBasicMaterial({ color: '#ffe888', side: THREE.DoubleSide, transparent: true, opacity: .75 }));
-        ring.rotation.x = -Math.PI / 2; ring.position.set(x, .07, -4.5); this.yard.add(ring);
+        ring.rotation.x = -Math.PI / 2; ring.position.set(x, .07, z); this.yard.add(ring);
       }
     }
   }

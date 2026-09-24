@@ -4,8 +4,9 @@ import { Share } from '@capacitor/share';
 import { World } from './world';
 import { advanceMotion } from './piloting';
 import {
-  BOATS, PORTS, SHAPE_NAMES, canFitAll, canPlace, jobById, jobsForPort,
+  BOATS, PORTS, HARBORS, SHAPE_NAMES, canFitAll, canPlace, jobById, jobsForPort,
   loadSave, occupiedCells, persist, rotatedCells, usableCells, isBlocked, boatUpgrade, repairCost, rareChance, specialOfferFor,
+  harborRequirements, refreshHarborUnlocks,
   type Job, type Phase, type Piece,
 } from './model';
 
@@ -119,7 +120,7 @@ function renderBoard(): void {
   const remainingCells = totalCells - usedCells;
   view.innerHTML = `<main class="side-panel board-panel" aria-label="Job board">
     ${headerStep('01 / PICK A DELIVERY', 'The job board', `A little cargo. A little chaos. Sailing from ${PORTS[save.port]}.`)}
-    <div class="port-strip"><div class="port-illustration" aria-hidden="true">⚓</div><div><span class="eyebrow">CURRENT PORT</span><strong>${PORTS[save.port]}</strong></div><span class="port-weather">☀ FAIR SEAS</span></div>
+    <div class="port-strip"><div class="port-illustration" aria-hidden="true">⚓</div><div><span class="eyebrow">CURRENT PORT</span><strong>${PORTS[save.port]}</strong></div><button class="port-map-link" type="button" data-action="map">View map →</button></div>
     <div class="capacity-strip" aria-label="Cargo hold capacity">
       <div class="capacity-main"><div><span class="eyebrow">${boat().name.toUpperCase()} · ${holdWidth()} × ${holdHeight()} HOLD</span><strong>${usedCells} / ${totalCells} cells booked</strong></div><span class="capacity-left">${remainingCells} left</span></div>
       <div class="capacity-meter" role="progressbar" aria-label="Cargo hold cells booked" aria-valuemin="0" aria-valuemax="${totalCells}" aria-valuenow="${usedCells}"><span style="width:${usedCells / totalCells * 100}%"></span></div>
@@ -129,7 +130,7 @@ function renderBoard(): void {
     <div class="job-list">${portJobs.map(job => jobCard(job, remainingCells)).join('')}</div>
     <div class="panel-foot"><div class="summary"><span>${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'} aboard</span><strong>${money(selectedPayout)} possible</strong></div>
       <button class="primary-button" type="button" data-action="pack" ${jobs.length ? '' : 'disabled'}>Pack the hold <span>→</span></button>
-      <button class="text-button" type="button" data-action="yard">Visit the shipyard <span>↗</span></button>
+      <div class="board-links"><button class="text-button" type="button" data-action="yard">⚓ Shipyard</button><button class="text-button" type="button" data-action="market">◈ Boat marketplace</button><button class="text-button" type="button" data-action="map">✦ Harbor map</button></div>
     </div>
   </main><div class="scene-caption"><span class="caption-badge">WELCOME TO ${PORTS[save.port].toUpperCase()}</span><strong>Small boat. Big plans.</strong><span>Pick a job and make a clean getaway.</span></div>`;
   view.querySelector<HTMLElement>('.board-panel')!.scrollTop = previousScroll;
@@ -208,7 +209,7 @@ function holdDiagram(index: number): string {
 
 function boatIcon(index: number): string {
   const craft = BOATS[index];
-  const contours = ['0,3 17,0 48,3 63,14 48,25 17,28 0,25', '0,11 15,3 46,0 67,14 46,28 15,25', '0,4 13,0 53,0 70,14 53,28 13,28 0,24', '0,9 12,1 56,0 72,14 56,28 12,27', '0,5 12,1 64,1 76,14 64,27 12,27 0,23'];
+  const contours = ['0,3 17,0 48,3 63,14 48,25 17,28 0,25', '0,11 15,3 46,0 67,14 46,28 15,25', '0,4 13,0 53,0 70,14 53,28 13,28 0,24', '0,9 12,1 56,0 72,14 56,28 12,27', '0,5 12,1 64,1 76,14 64,27 12,27 0,23', '0,12 19,5 51,3 73,14 51,25 19,23', '1,7 18,2 57,2 74,14 57,26 18,26 1,21', '0,5 13,1 60,1 73,14 60,27 13,27 0,23', '0,13 26,2 58,1 78,14 58,27 26,26', '0,3 13,1 66,1 80,14 66,27 13,27 0,25'];
   return `<svg class="yard-silhouette" viewBox="-2 -2 82 32" aria-hidden="true"><polygon points="${contours[index]}" fill="${craft.color}" stroke="#31576c" stroke-width="2"/><path d="M18 6h28v16H18z" fill="#fff4da" opacity=".88"/><path d="M30 8h9v12h-9z" fill="#80c8ca"/></svg>`;
 }
 
@@ -222,17 +223,19 @@ function renderYard(): void {
   const brokerPrice = 220 + save.yardUpgrades.brokerDesk * 260;
   const cards = BOATS.map((craft, index) => {
     const owned = save.ownedBoats.includes(index);
+    if (!owned) return '';
     const active = save.boat === index;
     const state = save.boatCondition[index] ?? 100;
     return `<article class="fleet-card ${active ? 'active' : ''} ${owned ? 'owned' : 'locked'}">
       <div class="fleet-card-top">${boatIcon(index)}<div><span class="eyebrow">${active ? 'ACTIVE BOAT' : owned ? 'IN YOUR FLEET' : 'NEW BOAT'}</span><h3>${craft.name}</h3><p>${craft.description}</p></div></div>
       <div class="fleet-card-bottom">${holdDiagram(index)}<div class="fleet-facts"><span><strong>${usableCells(craft)}</strong> cargo cells</span><span><strong>${Math.round(craft.speed * 100)}%</strong> speed · ${craft.handling}</span><span><strong>${craft.hull}</strong> hull · ${owned ? `${state}% condition` : `${money(craft.price)} to buy`}</span></div></div>
-      ${active ? '<span class="fleet-active-label">✓ Ready to sail</span>' : owned ? `<button class="secondary-button" type="button" data-action="switch-boat" data-id="${index}">Use this boat</button>` : `<button class="buy-button" type="button" data-action="buy-boat" data-id="${index}" ${save.cash < craft.price ? 'disabled' : ''}>Buy · ${money(craft.price)}</button>`}
+      ${active ? '<span class="fleet-active-label">✓ Ready to sail</span>' : `<button class="secondary-button" type="button" data-action="switch-boat" data-id="${index}">Use this boat</button>`}
     </article>`;
   }).join('');
   view.innerHTML = `<main class="side-panel yard-panel" aria-label="Shipyard">
     ${headerStep('THE SHIPYARD', 'Your fleet.', 'Every boat has its own shape, cargo hold and feel on the water.')}
     <div class="yard-summary"><span>⚓ ${save.ownedBoats.length} ${save.ownedBoats.length === 1 ? 'BOAT' : 'BOATS'} MOORED</span><span>ACTIVE · ${boat().name.toUpperCase()}</span></div>
+    <div class="yard-destinations"><button class="secondary-button" type="button" data-action="market">Browse all ${BOATS.length} boats →</button><button class="secondary-button" type="button" data-action="map">Open harbor map →</button></div>
     <div class="section-heading"><span>YOUR FLEET & BOATYARD</span><span>${save.ownedBoats.length}/${BOATS.length} OWNED</span></div>
     <div class="fleet-list">${cards}</div>
     <div class="section-heading"><span>${boat().name.toUpperCase()} · REFIT</span><span>BOAT SPECIFIC</span></div>
@@ -246,10 +249,53 @@ function renderYard(): void {
       <div class="upgrade"><div><span class="upgrade-icon">⚒</span><strong>Repair workshop</strong><small>Repairs cost ${save.yardUpgrades.repairBay * 18}% less · level ${save.yardUpgrades.repairBay}/3</small></div><button class="buy-button" type="button" data-action="repair-bay" ${save.yardUpgrades.repairBay >= 3 || save.cash < workshopPrice ? 'disabled' : ''}>${save.yardUpgrades.repairBay >= 3 ? 'MAX' : money(workshopPrice)}</button></div>
       <div class="upgrade"><div><span class="upgrade-icon">✦</span><strong>Broker's desk</strong><small>Rare, high paying job chance ${Math.round(rareChance(save) * 100)}% · level ${save.yardUpgrades.brokerDesk}/3</small></div><button class="buy-button" type="button" data-action="broker-desk" ${save.yardUpgrades.brokerDesk >= 3 || save.cash < brokerPrice ? 'disabled' : ''}>${save.yardUpgrades.brokerDesk >= 3 ? 'MAX' : money(brokerPrice)}</button></div>
     </div>
-    ${save.ownedBoats.includes(1) ? `<div class="next-boat owned"><span class="eyebrow">CHOOSE A PORT</span><h3>${PORTS[save.port]}</h3><p>Fogbank jobs pay more and bring more patrol attention.</p><button class="secondary-button" type="button" data-action="port">${save.port === 0 ? 'Sail from Fogbank' : 'Sail from Sleepy Cove'}</button></div>` : ''}
     <div class="panel-foot"><button class="secondary-button full" type="button" data-action="board">← Back to the job board</button></div>
   </main><div class="scene-caption"><span class="caption-badge">THE SHIPYARD</span><strong>All hands on deck.</strong><span>Build your fleet. Make every voyage count.</span></div>`;
   view.querySelector<HTMLElement>('.yard-panel')!.scrollTop = previousScroll;
+}
+
+function renderMarket(): void {
+  const previousScroll = view.querySelector<HTMLElement>('.market-screen')?.scrollTop ?? 0;
+  const catalog = BOATS.map((craft, index) => ({ craft, index })).sort((a, b) => a.craft.price - b.craft.price);
+  const cards = catalog.map(({ craft, index }, position) => {
+    const owned = save.ownedBoats.includes(index);
+    const active = save.boat === index;
+    return `<article class="market-card ${active ? 'market-active' : ''}" style="--boat-color:${craft.color}">
+      <div class="market-art"><span class="market-number">NO. ${String(position + 1).padStart(2, '0')}</span>${boatIcon(index)}<span class="market-badge">${owned ? active ? 'SAILING' : 'OWNED' : money(craft.price)}</span></div>
+      <div class="market-body"><h2>${craft.name}</h2><p>${craft.description}</p>
+      <div class="market-hold">${holdDiagram(index)}<span><strong>${usableCells(craft)} cells</strong><small>${craft.width} × ${craft.height} shaped hold</small></span></div>
+      <div class="market-stats"><span><strong>${Math.round(craft.speed * 100)}%</strong><small>Speed</small></span><span><strong>${craft.handling}</strong><small>Steering</small></span><span><strong>${craft.hull}</strong><small>Hull</small></span></div>
+      ${active ? '<span class="fleet-active-label">✓ Your active boat</span>' : owned ? `<button class="secondary-button full" type="button" data-action="switch-boat" data-id="${index}">Use this boat</button>` : `<button class="primary-button full" type="button" data-action="buy-boat" data-id="${index}" ${save.cash < craft.price ? 'disabled' : ''}>Buy for ${money(craft.price)}</button>`}</div>
+    </article>`;
+  }).join('');
+  view.innerHTML = `<main class="atlas-screen market-screen" aria-label="Boat marketplace"><div class="atlas-wrap">
+    <div class="atlas-top"><button class="atlas-back" type="button" data-action="yard">← Shipyard</button><span>⚓ THE BOAT MARKET</span><button class="atlas-back" type="button" data-action="map">Harbor map →</button></div>
+    <div class="atlas-heading"><span class="eyebrow">A BOAT FOR EVERY KIND OF CAPTAIN</span><h1>Find your next boat.</h1><p>Compare all ${BOATS.length} hulls. A bigger hold carries more cargo; a smaller boat answers the helm faster.</p></div>
+    <div class="market-grid">${cards}</div><div class="atlas-bottom"><button class="secondary-button" type="button" data-action="board">← Job board</button><button class="secondary-button" type="button" data-action="yard">Your shipyard →</button></div>
+  </div></main>`;
+  view.querySelector<HTMLElement>('.market-screen')!.scrollTop = previousScroll;
+}
+
+function renderMap(): void {
+  const stops = HARBORS.map((harbor, index) => {
+    const unlocked = save.unlockedPorts.includes(index);
+    const current = save.port === index;
+    const missing = unlocked ? [] : harborRequirements(save, index);
+    const requirements = index === 0 ? 'Your first home port' : [index > 1 ? `Unlock ${HARBORS[index - 1].name}` : null, harbor.requiredBoat !== null ? `Own ${BOATS[harbor.requiredBoat].name}` : null, harbor.reputation ? `${harbor.reputation} reputation` : null, harbor.capacity ? `${harbor.capacity}+ cargo cells` : null].filter(Boolean).join(' · ');
+    return `<article class="map-stop ${unlocked ? 'unlocked' : 'locked'} ${current ? 'current' : ''}" style="--harbor-color:${harbor.color}">
+      <div class="map-island" aria-hidden="true"><span>${harbor.icon}</span></div>
+      <div class="map-stop-body"><span class="eyebrow">STOP ${String(index + 1).padStart(2, '0')} · ${current ? 'CURRENT PORT' : unlocked ? 'UNLOCKED' : 'LOCKED'}</span><h2>${harbor.name}</h2><p>${harbor.subtitle}</p><small>${index === 0 ? 'Open from the start' : `Unlock: ${requirements}`}</small>
+      ${missing.length ? `<div class="map-missing">Still needed: ${missing.join(' · ')}</div>` : ''}
+      ${current ? '<span class="fleet-active-label">⚓ Sailing from here</span>' : unlocked ? `<button class="secondary-button" type="button" data-action="select-port" data-id="${index}">Sail from here →</button>` : '<span class="map-lock">🔒 Locked until requirements are met</span>'}</div>
+    </article>`;
+  }).join('');
+  view.innerHTML = `<main class="atlas-screen map-screen" aria-label="Harbor progression map"><div class="atlas-wrap">
+    <div class="atlas-top"><button class="atlas-back" type="button" data-action="board">← Job board</button><span>✦ THE HARBOR CHART</span><button class="atlas-back" type="button" data-action="market">Boat market →</button></div>
+    <div class="atlas-heading"><span class="eyebrow">EXPLORE THE COAST</span><h1>Harbors ahead.</h1><p>Earn reputation, expand your fleet, and chart a course to new ports. Unlocked harbors stay open forever.</p></div>
+    <div class="map-chart"><svg class="map-route" viewBox="0 0 1100 430" preserveAspectRatio="none" aria-hidden="true"><path d="M85 310 C240 150 280 120 330 230 S520 340 580 165 S760 60 820 205 S1000 330 1040 80" fill="none" stroke="#f8f0cf" stroke-width="18" stroke-linecap="round" stroke-dasharray="2 29" opacity=".85"/><path d="M85 310 C240 150 280 120 330 230 S520 340 580 165 S760 60 820 205 S1000 330 1040 80" fill="none" stroke="#547c83" stroke-width="3" stroke-linecap="round" stroke-dasharray="11 16" opacity=".62"/></svg><div class="map-stops">${stops}</div></div>
+    <div class="map-legend"><span><i class="legend-open"></i> Open harbor</span><span><i class="legend-locked"></i> Locked harbor</span><span>★ ${Math.floor(save.reputation)} reputation</span></div>
+    <div class="atlas-bottom"><button class="secondary-button" type="button" data-action="yard">← Shipyard</button><button class="secondary-button" type="button" data-action="board">Job board →</button></div>
+  </div></main>`;
 }
 
 function render(): void {
@@ -262,6 +308,8 @@ function render(): void {
   if (phase === 'result') renderResult();
   if (phase === 'yard') { world.showShipyard(save.ownedBoats, save.boat); renderYard(); }
   else world.hideShipyard();
+  if (phase === 'market') renderMarket();
+  if (phase === 'map') renderMap();
 }
 
 function addJob(id: string): void {
@@ -329,10 +377,13 @@ function endRun(won: boolean, reason: string): void {
   const rep = won ? 8 + jobs.length * 4 : -3;
   save.boatCondition[save.boat] = Math.max(30, Math.round(run.hull / run.maxHull * 100));
   save.cash += payout; save.reputation = Math.max(0, save.reputation + rep); save.runs++;
+  const previouslyOpen = save.unlockedPorts.length;
+  refreshHarborUnlocks(save);
   result = { won, reason, payout, base, bonus, adjustment, rep };
   run = null; phase = 'result'; saveProgress(); render();
   beep(won ? 660 : 180, 0.25, won ? 'triangle' : 'sawtooth');
   if (won) window.setTimeout(() => beep(880, 0.22, 'triangle'), 110);
+  if (save.unlockedPorts.length > previouslyOpen) notify(`${PORTS[save.unlockedPorts.at(-1)!]} unlocked! Open the harbor map.`, 'success');
 }
 
 function showImpact(label: string): void {
@@ -431,6 +482,8 @@ function handleAction(action: string, id?: string, target?: HTMLElement): void {
   else if (action === 'pack' && jobs.length) { phase = 'pack'; selected = pieces.find(piece => piece.x === null)?.id || null; render(); }
   else if (action === 'board') { phase = 'board'; render(); }
   else if (action === 'yard') { phase = 'yard'; render(); }
+  else if (action === 'market') { phase = 'market'; render(); }
+  else if (action === 'map') { phase = 'map'; render(); }
   else if (action === 'select-piece' && id) { selected = id; tick(); render(); }
   else if (action === 'rotate') { const piece = pieces.find(item => item.id === selected); if (piece && piece.x === null) { piece.rotation = (piece.rotation + 1) % 4; tick(); render(); } }
   else if (action === 'cell' && target) placeAt(Number(target.dataset.x), Number(target.dataset.y));
@@ -464,15 +517,22 @@ function handleAction(action: string, id?: string, target?: HTMLElement): void {
     if (!craft || save.ownedBoats.includes(index) || save.cash < craft.price) return;
     save.cash -= craft.price; save.ownedBoats.push(index); save.ownedBoats.sort((a, b) => a - b);
     save.boatUpgrades[index] = { engine: 0, hull: 0 }; save.boatCondition[index] = 100;
-    save.boat = index; if (index === 1) save.port = 1;
+    save.boat = index;
+    const previouslyOpen = save.unlockedPorts.length;
+    refreshHarborUnlocks(save);
+    if (index === 1 && save.unlockedPorts.includes(1)) save.port = 1;
     jobs = []; pieces = []; selected = null; world.setBoat(craft); saveProgress(); tick(); render();
-    notify(`${craft.name} is yours${index === 1 ? '. Fogbank Harbour is open' : ''}!`, 'success');
+    notify(`${craft.name} is yours${save.unlockedPorts.length > previouslyOpen ? ` · ${PORTS[save.unlockedPorts.at(-1)!]} unlocked` : ''}!`, 'success');
   }
   else if (action === 'switch-boat' && id) {
     const index = Number(id); if (!save.ownedBoats.includes(index) || index === save.boat) return;
     save.boat = index; jobs = []; pieces = []; selected = null; world.setBoat(boat()); saveProgress(); tick(); render(); notify(`${boat().name} is ready to sail.`, 'success');
   }
-  else if (action === 'port' && save.ownedBoats.includes(1)) { save.port = save.port === 0 ? 1 : 0; jobs = []; pieces = []; saveProgress(); tick(); render(); notify(`Now sailing from ${PORTS[save.port]}.`); }
+  else if (action === 'select-port' && id) {
+    const index = Number(id); if (!save.unlockedPorts.includes(index) || index === save.port) return;
+    save.port = index; jobs = []; pieces = []; selected = null; phase = 'board';
+    saveProgress(); tick(); render(); notify(`Now sailing from ${PORTS[index]}.`, 'success');
+  }
 
 }
 

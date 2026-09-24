@@ -35,7 +35,7 @@ test('rotation normalizes a shape and occupied cells block later crates', () => 
 
 test('different hull outlines change usable cargo cells and reject wall overlap', async () => {
   const { BOATS, usableCells } = await import('../src/model');
-  assert.deepEqual(BOATS.map(usableCells), [12, 18, 22, 31, 44]);
+  assert.deepEqual(BOATS.map(usableCells), [12, 18, 22, 31, 44, 13, 26, 31, 36, 50]);
   const [crate] = piecesFor('teapots');
   assert.equal(canPlace(crate, 0, 0, [crate], 5, 4, BOATS[1].blocked), false);
   assert.equal(canPlace(crate, 1, 0, [crate], 5, 4, BOATS[1].blocked), true);
@@ -67,6 +67,53 @@ test('previous saves keep the owned speedboat and upgrades', async () => {
     assert.deepEqual(restored.ownedBoats, [0, 1]);
     assert.deepEqual(restored.boatUpgrades[1], { engine: 2, hull: 1 });
     assert.equal(restored.port, 1);
+    assert.ok(restored.unlockedPorts.includes(1));
     assert.equal(restored.yardUpgrades.brokerDesk, 0);
   } finally { Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: previous }); }
+});
+
+
+test('harbor map unlocks follow boat and reputation requirements and stay open', async () => {
+  const { defaultSave, HARBORS, harborRequirements, refreshHarborUnlocks } = await import('../src/model');
+  const save = defaultSave();
+  assert.equal(HARBORS.length, 5);
+  assert.deepEqual(save.unlockedPorts, [0]);
+  assert.match(harborRequirements(save, 1).join(' '), /Skipjack/);
+  save.ownedBoats.push(1);
+  refreshHarborUnlocks(save);
+  assert.deepEqual(save.unlockedPorts, [0, 1]);
+  save.reputation = 25;
+  assert.match(harborRequirements(save, 2).join(' '), /22\+ cargo cells/);
+  save.ownedBoats.push(2);
+  refreshHarborUnlocks(save);
+  assert.ok(save.unlockedPorts.includes(2));
+  save.reputation = 0;
+  refreshHarborUnlocks(save);
+  assert.ok(save.unlockedPorts.includes(2));
+});
+
+test('every harbor has distinct jobs and all can fit a large hull', async () => {
+  const { BOATS, jobsForPort, HARBORS } = await import('../src/model');
+  const ids = new Set<string>();
+  for (let port = 0; port < HARBORS.length; port++) {
+    const jobs = jobsForPort(port);
+    assert.equal(jobs.length, 5);
+    for (const job of jobs) {
+      assert.ok(!ids.has(job.id)); ids.add(job.id);
+      const crates = job.shapes.map((shape, index) => ({ id: `${job.id}-${index}`, jobId: job.id, shape, rotation: 0, x: null, y: null })) as Piece[];
+      assert.equal(canFitAll(crates, BOATS[9].width, BOATS[9].height, BOATS[9].blocked), true, `${job.id} should fit`);
+    }
+  }
+});
+
+
+test('later harbors cannot skip the previous stop', async () => {
+  const { defaultSave, harborRequirements, refreshHarborUnlocks } = await import('../src/model');
+  const save = defaultSave(); save.reputation = 200; save.ownedBoats.push(4);
+  refreshHarborUnlocks(save);
+  assert.deepEqual(save.unlockedPorts, [0]);
+  assert.match(harborRequirements(save, 2).join(' '), /Fogbank Harbour first/);
+  save.ownedBoats.push(1);
+  refreshHarborUnlocks(save);
+  assert.deepEqual(save.unlockedPorts, [0, 1, 2, 3, 4]);
 });

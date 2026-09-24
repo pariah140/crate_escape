@@ -1,8 +1,8 @@
-export type Phase = 'board' | 'pack' | 'run' | 'result' | 'yard';
+export type Phase = 'board' | 'pack' | 'run' | 'result' | 'yard' | 'market' | 'map';
 export type CargoKind = 'standard' | 'bulky' | 'hot' | 'perishable' | 'fragile' | 'vip';
 export type Cell = readonly [number, number];
 export type Shape = 'single' | 'domino' | 'line3' | 'square' | 'ell' | 'tee' | 'ess';
-export type BoatStyle = 'dinghy' | 'speedboat' | 'trawler' | 'cruiser' | 'freighter';
+export type BoatStyle = 'dinghy' | 'speedboat' | 'trawler' | 'cruiser' | 'freighter' | 'skiff' | 'catamaran' | 'houseboat' | 'clipper' | 'barge';
 export interface BoatDefinition {
   name: string; style: BoatStyle; width: number; height: number; blocked: Cell[];
   speed: number; turnRate: number; acceleration: number; coast: number; hull: number;
@@ -40,7 +40,8 @@ export interface SaveData {
   reputation: number;
   boat: number;
   ownedBoats: number[];
-  port: 0 | 1;
+  port: number;
+  unlockedPorts: number[];
   boatUpgrades: Record<number, BoatUpgrades>;
   boatCondition: Record<number, number>;
   yardUpgrades: YardUpgrades;
@@ -54,6 +55,11 @@ export const BOATS: BoatDefinition[] = [
   { name: 'Merry Trawler', style: 'trawler', width: 6, height: 4, blocked: [[0, 0], [5, 0]], speed: 0.91, turnRate: 2.0, acceleration: 1.8, coast: 0.85, hull: 145, price: 720, repairRate: 1.45, color: '#75c7a6', handling: 'Steady', description: 'A broad workboat that shrugs off bumps.' },
   { name: 'Sunbeam Cruiser', style: 'cruiser', width: 7, height: 5, blocked: [[0, 0], [6, 0], [0, 4], [6, 4]], speed: 1.08, turnRate: 1.5, acceleration: 1.35, coast: 0.7, hull: 180, price: 1650, repairRate: 1.8, color: '#f49aa0', handling: 'Wide turns', description: 'Long decks, a pinched bow, and plenty of cargo room.' },
   { name: 'Cloudbreak Freighter', style: 'freighter', width: 8, height: 6, blocked: [[0, 0], [7, 0], [3, 5], [4, 5]], speed: 0.82, turnRate: 0.9, acceleration: 0.9, coast: 0.48, hull: 250, price: 3400, repairRate: 2.2, color: '#a79cda', handling: 'Heavy turns', description: 'A floating warehouse with a slow, deliberate helm.' },
+  { name: 'Pip Skiff', style: 'skiff', width: 5, height: 3, blocked: [[0, 0], [4, 0]], speed: 1.42, turnRate: 4.1, acceleration: 3.6, coast: 1.4, hull: 75, price: 390, repairRate: 1.25, color: '#7ccbe1', handling: 'Razor turns', description: 'A darting little courier with exposed deck space.' },
+  { name: 'Twinfin Catamaran', style: 'catamaran', width: 6, height: 5, blocked: [[0, 0], [5, 0], [2, 4], [3, 4]], speed: 1.18, turnRate: 2.25, acceleration: 2.15, coast: 0.92, hull: 125, price: 1080, repairRate: 1.55, color: '#87ddd1', handling: 'Balanced', description: 'Two slim hulls and a broad, split cargo deck.' },
+  { name: 'Hearthside Houseboat', style: 'houseboat', width: 7, height: 5, blocked: [[0, 0], [6, 0], [0, 4], [6, 4]], speed: 0.76, turnRate: 1.12, acceleration: 1.05, coast: 0.56, hull: 205, price: 1980, repairRate: 1.7, color: '#f1b779', handling: 'Gentle turns', description: 'A floating cottage with a generous square hold.' },
+  { name: 'Bluebell Clipper', style: 'clipper', width: 8, height: 5, blocked: [[0, 0], [7, 0], [0, 4], [7, 4]], speed: 1.3, turnRate: 1.3, acceleration: 1.45, coast: 0.65, hull: 160, price: 2850, repairRate: 2.05, color: '#7cafe0', handling: 'Sweeping turns', description: 'A long, swift hull that needs room to carve.' },
+  { name: 'Mossbank Barge', style: 'barge', width: 9, height: 6, blocked: [[0, 0], [8, 0], [0, 5], [8, 5]], speed: 0.68, turnRate: 0.68, acceleration: 0.75, coast: 0.36, hull: 310, price: 4950, repairRate: 2.45, color: '#a5bb7a', handling: 'Very wide turns', description: 'The biggest hold afloat, with a patient helm.' },
 ];
 
 export const usableCells = (boat: BoatDefinition): number => boat.width * boat.height - boat.blocked.length;
@@ -64,7 +70,33 @@ export const repairCost = (save: SaveData, index = save.boat): number => Math.ce
 );
 export const rareChance = (save: SaveData): number => 0.14 + save.yardUpgrades.brokerDesk * 0.16;
 
-export const PORTS = ['Sleepy Cove', 'Fogbank Harbour'] as const;
+export const HARBORS = [
+  { name: 'Sleepy Cove', subtitle: 'The gentle beginning', color: '#78cba8', icon: '⌂', reputation: 0, capacity: 0, requiredBoat: null },
+  { name: 'Fogbank Harbour', subtitle: 'Mist and mystery', color: '#a7b9d2', icon: '♜', reputation: 0, capacity: 0, requiredBoat: 1 },
+  { name: 'Coral Key', subtitle: 'Bright reefs and bold jobs', color: '#f5a481', icon: '✿', reputation: 25, capacity: 22, requiredBoat: null },
+  { name: 'Lantern Bay', subtitle: 'Night markets on the tide', color: '#dfb57c', icon: '✦', reputation: 70, capacity: 31, requiredBoat: null },
+  { name: 'Starfall Port', subtitle: 'The far end of the chart', color: '#b3a8df', icon: '★', reputation: 140, capacity: 44, requiredBoat: null },
+] as const;
+export const PORTS = HARBORS.map(harbor => harbor.name);
+export function harborRequirements(save: SaveData, index: number): string[] {
+  const harbor = HARBORS[index];
+  if (!harbor) return ['Unknown harbor'];
+  const unmet: string[] = [];
+  if (index > 0 && !save.unlockedPorts.includes(index - 1)) unmet.push(`Unlock ${HARBORS[index - 1].name} first`);
+  if (harbor.requiredBoat !== null && !save.ownedBoats.includes(harbor.requiredBoat)) unmet.push(`Own the ${BOATS[harbor.requiredBoat].name}`);
+  if (save.reputation < harbor.reputation) unmet.push(`${harbor.reputation} reputation (${Math.floor(save.reputation)}/${harbor.reputation})`);
+  if (Math.max(...save.ownedBoats.map(id => usableCells(BOATS[id]))) < harbor.capacity) unmet.push(`Own a boat with ${harbor.capacity}+ cargo cells`);
+  return unmet;
+}
+export function refreshHarborUnlocks(save: SaveData): number[] {
+  const unlocked = new Set(save.unlockedPorts);
+  HARBORS.forEach((_, index) => {
+    save.unlockedPorts = [...unlocked].sort((a, b) => a - b);
+    if (harborRequirements(save, index).length === 0) unlocked.add(index);
+  });
+  save.unlockedPorts = [...unlocked].sort((a, b) => a - b);
+  return save.unlockedPorts;
+}
 
 export const SHAPES: Record<Shape, Cell[]> = {
   single: [[0, 0]],
@@ -96,11 +128,37 @@ const fogJobs: Job[] = [
   { id: 'mystery2', client: 'Mr. Definitely Normal', cargo: 'Unlabelled crates', kind: 'hot', shapes: ['ess'], payout: 164, heat: 5, destination: 'The Back Pier', note: 'Best not to ask about the labels.', color: '#ec8b65', icon: '?' },
 ];
 
+const coralJobs: Job[] = [
+  { id: 'coralglass', client: 'Reef Glassworks', cargo: 'Sea glass lamps', kind: 'fragile', shapes: ['square', 'domino'], payout: 210, heat: 2, destination: 'Shell Pier', note: 'Keep the glass out of trouble.', color: '#91d7c7', icon: '◈' },
+  { id: 'sunsails', client: 'Sun Sail Club', cargo: 'Festival sails', kind: 'bulky', shapes: ['tee', 'ell'], payout: 230, heat: 2, destination: 'Palm Jetty', note: 'Beautiful, but they catch every breeze.', color: '#ffb66d', icon: '✿' },
+  { id: 'seahorses', client: 'The Tiny Aquarium', cargo: 'Seahorse tanks', kind: 'vip', shapes: ['square', 'single'], payout: 255, heat: 3, destination: 'Lagoon Slip', note: 'Centre the VIP tank.', color: '#acd0ec', icon: '◆' },
+  { id: 'reefice', client: 'Coral Creamery', cargo: 'Frozen reef treats', kind: 'perishable', shapes: ['ess', 'domino'], payout: 270, heat: 3, destination: 'Bright Quay', note: 'The sun is not on your side.', color: '#f8aabd', icon: '❄' },
+  { id: 'coralcrate', client: 'Captain Hush', cargo: 'Sealed reef crates', kind: 'hot', shapes: ['tee', 'square'], payout: 310, heat: 5, destination: 'Hidden Anchorage', note: 'The patrol knows this sender.', color: '#e69b82', icon: '?' },
+];
+const lanternJobs: Job[] = [
+  { id: 'lanterns', client: 'Night Market Guild', cargo: 'Paper lanterns', kind: 'fragile', shapes: ['tee', 'square'], payout: 340, heat: 2, destination: 'Glow Pier', note: 'Delicate and dazzling.', color: '#f4c573', icon: '✦' },
+  { id: 'clockwork', client: 'Clockwork & Co.', cargo: 'Toy automata', kind: 'standard', shapes: ['ess', 'ell', 'single'], payout: 360, heat: 3, destination: 'Clock Quay', note: 'Some of them tick on the way.', color: '#adbee1', icon: '♟' },
+  { id: 'velvet', client: 'Madame Marigold', cargo: 'Velvet costumes', kind: 'vip', shapes: ['square', 'domino'], payout: 385, heat: 3, destination: 'Theatre Dock', note: 'A central berth for the star crate.', color: '#e8a1be', icon: '◆' },
+  { id: 'noodles', client: 'Moon Noodle House', cargo: 'Midnight noodles', kind: 'perishable', shapes: ['tee', 'tee'], payout: 405, heat: 2, destination: 'Lantern Steps', note: 'Hot food waits for nobody.', color: '#e8d899', icon: '◒' },
+  { id: 'masked', client: 'The Masked Merchant', cargo: 'Masked parcels', kind: 'hot', shapes: ['square', 'ess'], payout: 470, heat: 5, destination: 'Shaded Slip', note: 'The market closes at dawn.', color: '#b697d8', icon: '?' },
+];
+const starfallJobs: Job[] = [
+  { id: 'comets', client: 'The Observatory', cargo: 'Comet lenses', kind: 'fragile', shapes: ['square', 'tee'], payout: 540, heat: 3, destination: 'Sky Pier', note: 'One scratch ruins the view.', color: '#a3d7e8', icon: '✧' },
+  { id: 'starfruit', client: 'Starlight Orchard', cargo: 'Starfruit baskets', kind: 'perishable', shapes: ['ess', 'ell', 'domino'], payout: 565, heat: 2, destination: 'Orchard Jetty', note: 'Bring the harvest home fresh.', color: '#f2bf70', icon: '✿' },
+  { id: 'festivalgrand', client: 'The Grand Regatta', cargo: 'Regatta trophies', kind: 'vip', shapes: ['square', 'square'], payout: 610, heat: 4, destination: 'Champion Dock', note: 'The winner rides in the centre.', color: '#ebd192', icon: '◆' },
+  { id: 'meteor', client: 'The Meteor Museum', cargo: 'Meteor fragments', kind: 'bulky', shapes: ['tee', 'ess', 'line3'], payout: 650, heat: 3, destination: 'Crater Quay', note: 'Heavier than they look.', color: '#a6a9cb', icon: '◈' },
+  { id: 'cosmic', client: 'Captain Nobody', cargo: 'Cosmic mystery cases', kind: 'hot', shapes: ['square', 'tee', 'domino'], payout: 740, heat: 5, destination: 'Far Point', note: 'The patrol would like a word.', color: '#d99cba', icon: '?' },
+];
+const portJobs = [coveJobs, fogJobs, coralJobs, lanternJobs, starfallJobs];
+
 const specialJobs: Job[][] = [
   [{ id: 'pearl', client: 'The Pearl Conservatory', cargo: 'Moonlit pearls', kind: 'fragile', shapes: ['tee', 'domino'], payout: 265, heat: 3, destination: 'Starfish Wharf', note: 'Rare commission · handle every crate gently.', color: '#a8dded', icon: '✧', rare: true },
     { id: 'festival', client: 'Harbour Festival', cargo: 'Firework lanterns', kind: 'vip', shapes: ['square', 'ell'], payout: 295, heat: 4, destination: 'Lantern Pier', note: 'Rare commission · keep the VIP crate centred.', color: '#f8b476', icon: '✦', rare: true }],
   [{ id: 'crown', client: 'The Crown Museum', cargo: 'Lost crown jewels', kind: 'vip', shapes: ['square', 'tee'], payout: 390, heat: 5, destination: 'Royal Slip', note: 'Rare commission · the patrol is watching.', color: '#e2bf73', icon: '✧', rare: true },
     { id: 'starlight', client: 'The Astral Society', cargo: 'Starlight bottles', kind: 'fragile', shapes: ['ess', 'domino'], payout: 360, heat: 3, destination: 'Moonbeam Dock', note: 'Rare commission · a very delicate delivery.', color: '#bca9ec', icon: '✦', rare: true }],
+  [{ id: 'reefpearl', client: 'Pearl Divers Union', cargo: 'Rainbow pearls', kind: 'fragile', shapes: ['square', 'ess'], payout: 520, heat: 4, destination: 'Pearl Point', note: 'Rare commission · every shell is precious.', color: '#a6e4d8', icon: '✧', rare: true }],
+  [{ id: 'royallantern', client: 'The Royal Lanterns', cargo: 'Golden lanterns', kind: 'vip', shapes: ['square', 'tee', 'single'], payout: 720, heat: 5, destination: 'Palace Pier', note: 'Rare commission · keep the gold centred.', color: '#f2ca75', icon: '✦', rare: true }],
+  [{ id: 'constellation', client: 'The Star Cartographers', cargo: 'Constellation charts', kind: 'fragile', shapes: ['square', 'tee', 'ell'], payout: 990, heat: 4, destination: 'North Star Dock', note: 'Rare commission · the charts are one of a kind.', color: '#bed0f1', icon: '★', rare: true }],
 ];
 
 /** One stable offer per completed run. A better broker increases the offer frequency. */
@@ -109,8 +167,8 @@ export function specialOfferFor(save: SaveData): Job | null {
   const roll = ((seed ^ (seed >>> 16)) % 1000) / 1000;
   return roll < rareChance(save) ? specialJobs[save.port][seed % specialJobs[save.port].length] : null;
 }
-export function jobsForPort(port: number, special: Job | null = null): Job[] { return [...(port === 0 ? coveJobs : fogJobs), ...(special ? [special] : [])]; }
-export function jobById(id: string): Job | undefined { return [...coveJobs, ...fogJobs, ...specialJobs.flat()].find(job => job.id === id); }
+export function jobsForPort(port: number, special: Job | null = null): Job[] { return [...(portJobs[port] || coveJobs), ...(special ? [special] : [])]; }
+export function jobById(id: string): Job | undefined { return [...portJobs.flat(), ...specialJobs.flat()].find(job => job.id === id); }
 
 export function rotatedCells(shape: Shape, rotation: number): Cell[] {
   let cells: Cell[] = SHAPES[shape].map(([x, y]) => [x, y]);
@@ -176,7 +234,7 @@ export function canFitAll(pieces: Piece[], width: number, height: number, blocke
 }
 
 export function defaultSave(): SaveData {
-  return { cash: 80, reputation: 0, boat: 0, ownedBoats: [0], port: 0, boatUpgrades: { 0: { engine: 0, hull: 0 } }, boatCondition: { 0: 100 }, yardUpgrades: { repairBay: 0, brokerDesk: 0 }, runs: 0, sound: true };
+  return { cash: 80, reputation: 0, boat: 0, ownedBoats: [0], port: 0, unlockedPorts: [0], boatUpgrades: { 0: { engine: 0, hull: 0 } }, boatCondition: { 0: 100 }, yardUpgrades: { repairBay: 0, brokerDesk: 0 }, runs: 0, sound: true };
 }
 
 export function loadSave(): SaveData {
@@ -193,10 +251,14 @@ export function loadSave(): SaveData {
       boatUpgrades[index] = { engine: Math.max(0, Math.min(3, Number(previous?.engine) || 0)), hull: Math.max(0, Math.min(3, Number(previous?.hull) || 0)) };
       boatCondition[index] = Math.max(30, Math.min(100, Number(data.boatCondition?.[index]) || 100));
     }
-    return { cash: Math.max(0, data.cash), reputation: Number(data.reputation) || 0, boat: owned.includes(selected) ? selected : 0,
-      ownedBoats: owned, port: data.port === 1 && owned.includes(1) ? 1 : 0, boatUpgrades, boatCondition,
+    const restored: SaveData = { cash: Math.max(0, data.cash), reputation: Number(data.reputation) || 0, boat: owned.includes(selected) ? selected : 0,
+      ownedBoats: owned, port: Number.isInteger(data.port) && data.port! >= 0 && data.port! < HARBORS.length ? data.port! : 0,
+      unlockedPorts: [...new Set([0, ...(Array.isArray(data.unlockedPorts) ? data.unlockedPorts : data.port === 1 ? [1] : [])])].filter(index => Number.isInteger(index) && index >= 0 && index < HARBORS.length), boatUpgrades, boatCondition,
       yardUpgrades: { repairBay: Math.max(0, Math.min(3, Number(data.yardUpgrades?.repairBay) || 0)), brokerDesk: Math.max(0, Math.min(3, Number(data.yardUpgrades?.brokerDesk) || 0)) },
       runs: Math.max(0, Number(data.runs) || 0), sound: typeof data.sound === 'boolean' ? data.sound : initial.sound };
+    refreshHarborUnlocks(restored);
+    if (!restored.unlockedPorts.includes(restored.port)) restored.port = 0;
+    return restored;
   } catch { return defaultSave(); }
 }
 
