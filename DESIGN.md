@@ -51,7 +51,7 @@ During a run, open screen space steers directly to the tapped water point; dragg
 
 ## Voyage progression
 
-One hundred deterministic voyages scale the number of rocks, sandbanks, currents, and patrols while narrowing the waterway. The job board previews each voyage's weather, obstacle count, patrol count, and pay multiplier. Later voyages add wind, rain, fog, storms, and night lighting. Sound patrols have purple acoustic rings rather than searchlights. Their first appearance pauses play for an illustrated tutorial; cutting the engine lets a moving boat coast silently through their listening area. Weather, current swirls, shorelines, and sandbanks need visible cues that agree with their collision and force rules.
+Twenty-five harbours each have a fixed coastline shape, local hazards, theme, landmarks, and cargo identity. The chart groups them into five coastal regions and previews each distinct route. Successful deliveries advance an unbounded voyage number; each voyage generates a fresh arrangement of added hazards, patrols, and conditions on the selected harbour's recognizable coast. Difficulty increases toward a practical cap, while pay grows gently without a hard voyage limit. The job board previews weather, obstacle count, patrol count, and pay multiplier. Later voyages add wind, rain, fog, storms, and night lighting. Sound patrols have purple acoustic rings rather than searchlights. Their first appearance pauses play for an illustrated tutorial; cutting the engine lets a moving boat coast silently through their listening area. Weather, current swirls, shorelines, and sandbanks need visible cues that agree with their collision and force rules.
 
 ## Elevation & Depth
 
@@ -75,4 +75,4 @@ Each boat has a different low poly hull silhouette, cabin equipment, cargo footp
 
 ## Marketplace and harbor chart
 
-The marketplace is a full paper catalog ordered by price, with every boat's own silhouette, hold footprint, steering and hull side by side. The shipyard lists only owned boats and links to the catalog. The harbor chart is a separate illustrated route: open stops use color, locked stops use dashed borders, and each stop prints the exact requirement and current gap. New harbors unlock in sequence through boat ownership, hold capacity and reputation, and stay open after purchase or boat switching.
+The marketplace is a full paper catalog ordered by price, with every boat's own silhouette, hold footprint, steering and hull side by side. The shipyard lists only owned boats and links to the catalog. The harbor chart is an illustrated 25-stop atlas: open stops use color, locked stops use dashed borders, each stop shows a miniature route and the exact unlock requirement and current gap. New harbors unlock in sequence through boat ownership, hold capacity and reputation, and stay open after purchase or boat switching.

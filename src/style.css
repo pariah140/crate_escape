@@ -396,6 +396,24 @@ button:active:not(:disabled) { transform: translateY(2px); }
 .map-legend i { width: 11px; height: 11px; border-radius: 50%; border: 2px solid #3f7c7b; }
 .map-legend .legend-open { background: #8dd7a6; }
 .map-legend .legend-locked { background: #d0d2c7; }
+.map-chart { display: flex; flex-direction: column; gap: 22px; min-height: 0; padding: 17px; }
+.map-chart::before, .map-route { display: none; }
+.map-region { position: relative; padding: 14px 12px 17px; border: 2px dashed rgba(241,253,231,.72); border-radius: 16px; background: rgba(9,96,111,.17); }
+.map-region-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 7px 15px; padding: 0 2px 13px; color: #fff8df; text-shadow: 1px 2px 0 #347a86; }
+.map-region-head span, .map-region-head small { font: 900 10px ui-monospace, monospace; letter-spacing: .07em; }
+.map-region-head strong { font-size: 19px; letter-spacing: -.03em; }
+.map-region-head small { margin-left: auto; }
+.map-stops { min-height: 0; align-items: stretch; }
+.map-stop { display: flex; flex-direction: column; gap: 4px; min-height: 294px; padding: 10px; }
+.map-stop:nth-child(n) { transform: none; }
+.map-island { margin: 0 auto 4px; }
+.map-stop-body { display: flex; flex-direction: column; flex: 1; }
+.map-stop-body p { min-height: 25px; }
+.map-mini { position: relative; height: 50px; margin: 2px 0 9px; overflow: hidden; border-radius: 8px; border: 1px solid rgba(27,102,113,.36); background: linear-gradient(90deg, var(--harbor-color) 0 25%, #6cb6ba 27% 73%, var(--harbor-color) 75%); }
+.map-mini-route { display: block; width: 100%; height: 100%; }
+.map-mini span { position: absolute; right: 3px; bottom: 2px; padding: 2px 3px; border-radius: 3px; background: #fff8db; color: #37636b; font: 900 7px ui-monospace, monospace; letter-spacing: .02em; }
+.map-stop-body > small { min-height: 0; margin-top: auto; }
+.map-stop .fleet-active-label, .map-stop .map-lock, .map-stop .secondary-button { margin-top: 9px; }
 @media (max-width: 950px) {
   .map-stops { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 25px 12px; }
   .map-chart { min-height: 0; }
@@ -424,9 +442,10 @@ button:active:not(:disabled) { transform: translateY(2px); }
   .market-badge { top: auto; bottom: 8px; right: 5px; }
   .market-body p { min-height: 0; }
   .map-stops { gap: 17px; padding: 10px 0; }
-  .map-stop { display: grid; grid-template-columns: 64px 1fr; gap: 5px; }
-  .map-island { align-self: center; margin: 0; }
+  .map-stop { display: grid; grid-template-columns: 55px 1fr; gap: 5px; min-height: 0; }
+  .map-island { align-self: center; width: 43px; height: 42px; margin: 0; }
   .map-stop small { min-height: 0; }
+  .map-mini { height: 42px; }
   .yard-destinations { grid-template-columns: 1fr; }
 }
 .port-map-link { margin-left: auto; flex: none; border: 0; background: transparent; color: #226e68; padding: 5px; font: 900 10px ui-monospace, monospace; text-decoration: underline; text-underline-offset: 3px; }

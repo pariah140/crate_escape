@@ -72,11 +72,19 @@ test('previous saves keep the owned speedboat and upgrades', async () => {
   } finally { Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: previous }); }
 });
 
+test('saved voyage numbers are no longer capped at one hundred', async () => {
+  const { loadSave } = await import('../src/model');
+  const previous = globalThis.localStorage;
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => JSON.stringify({ cash: 80, boat: 0, runs: 1233, level: 1234 }) } });
+  try { assert.equal(loadSave().level, 1234); }
+  finally { Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: previous }); }
+});
+
 
 test('harbor map unlocks follow boat and reputation requirements and stay open', async () => {
   const { defaultSave, HARBORS, harborRequirements, refreshHarborUnlocks } = await import('../src/model');
   const save = defaultSave();
-  assert.equal(HARBORS.length, 5);
+  assert.equal(HARBORS.length, 25);
   assert.deepEqual(save.unlockedPorts, [0]);
   assert.match(harborRequirements(save, 1).join(' '), /Skipjack/);
   save.ownedBoats.push(1);
@@ -115,5 +123,5 @@ test('later harbors cannot skip the previous stop', async () => {
   assert.match(harborRequirements(save, 2).join(' '), /Fogbank Harbour first/);
   save.ownedBoats.push(1);
   refreshHarborUnlocks(save);
-  assert.deepEqual(save.unlockedPorts, [0, 1, 2, 3, 4]);
+  assert.ok([0, 1, 2, 3, 4, 5].every(index => save.unlockedPorts.includes(index)));
 });

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { patrolPose } from './patrols';
-import { channelHalfWidth, levelPlan, type LevelPlan } from './levels';
+import { channelCenter, channelHalfWidth, destinationX, levelPlan, type LevelPlan } from './levels';
+import { HARBORS, type Biome } from './harbors';
 import { BOATS, type BoatDefinition, type BoatStyle } from './model';
 
 const mat = (color: string, roughness = 0.85) => new THREE.MeshStandardMaterial({ color, roughness, flatShading: true });
@@ -132,13 +133,37 @@ function makeSandbank(parent: THREE.Object3D, x: number, z: number, radius: numb
   parent.add(group); return group;
 }
 
+function makeCoastalLandmark(parent: THREE.Object3D, x: number, z: number, biome: Biome, accent: string, seed: number): void {
+  const group = new THREE.Group(); group.position.set(x, 0, z);
+  const base = cylinder(group, biome === 'volcanic' ? '#615e67' : biome === 'ice' ? '#e5eee5' : '#eed294', 0, .24, 0, 2.3, .45, 7);
+  base.scale.z = .78;
+  if (biome === 'reef') {
+    for (let i = 0; i < 4; i++) { const branch = cone(group, i % 2 ? '#f49b80' : accent, Math.sin(i * 2.1) * .9, 1.1, Math.cos(i * 2.1) * .7, .3, 1.6 + i * .17, 5); branch.rotation.z = (i - 1.5) * .22; }
+  } else if (biome === 'marsh' || biome === 'mist') {
+    for (let i = 0; i < 7; i++) { const xx = Math.sin(i * 2.3) * 1.3, zz = Math.cos(i * 2.3) * .9; cylinder(group, '#648a62', xx, .95 + i * .07, zz, .045, 1.5 + i * .14, 5); cone(group, biome === 'mist' ? '#b6c4cf' : '#8ba868', xx, 1.75 + i * .14, zz, .16, .42, 5); }
+  } else if (biome === 'pine') {
+    for (let i = 0; i < 3; i++) { const xx = (i - 1) * .9; cylinder(group, '#896f58', xx, 1.25, i % 2 ? .5 : -.4, .13, 2.2, 6); cone(group, i % 2 ? '#4f947c' : '#387d70', xx, 2.5, i % 2 ? .5 : -.4, .8, 2.4, 6); }
+  } else if (biome === 'ice' || biome === 'star') {
+    for (let i = 0; i < 3; i++) { const crystal = cone(group, i % 2 ? '#d6eaf0' : accent, (i - 1) * .68, 1.2 + i * .25, i % 2 ? .4 : -.3, .52, 2.2 + i * .45, 5); crystal.rotation.z = (i - 1) * .17; }
+  } else if (biome === 'volcanic' || biome === 'cliff') {
+    for (let i = 0; i < 3; i++) { const stack = cylinder(group, biome === 'volcanic' ? '#735b5d' : '#8a9a9d', (i - 1) * .72, .85 + i * .23, i % 2 ? .45 : -.3, .58 - i * .08, 1.5 + i * .3, 6); stack.rotation.z = (i - 1) * .07; }
+    if (biome === 'volcanic') cone(group, '#e89067', .1, 2.25, 0, .35, .8, 5);
+  } else if (biome === 'lantern') {
+    cylinder(group, '#8b694e', 0, 1.5, 0, .12, 2.8, 6);
+    box(group, '#f3c67e', 0, 2.9, 0, .8, .85, .8); cone(group, accent, 0, 3.5, 0, .65, .55, 4);
+  } else makeIsland(group, 0, 0, .35);
+  group.rotation.y = seed * .73; parent.add(group);
+}
+
 function makeChannelBanks(parent: THREE.Object3D, plan: LevelPlan): void {
+  const harbor = HARBORS[plan.port];
   for (const side of [-1, 1]) {
-    for (const [offset, span, color, height] of [[0, 34, '#e9c783', .055], [4.3, 29, '#73b886', .11]] as const) {
+    for (const [offset, span, color, height] of [[0, 34, harbor.biome === 'volcanic' ? '#bd9c84' : harbor.biome === 'ice' ? '#d6e4dc' : '#e9c783', .055], [4.3, 29, harbor.color, .11]] as const) {
       const vertices: number[] = []; const indices: number[] = [];
       for (let z = -22; z <= 548; z += 6) {
-        const edge = side * (channelHalfWidth(plan, z) + offset);
-        vertices.push(edge, height, z, side * (channelHalfWidth(plan, z) + offset + span), height, z);
+        const center = channelCenter(plan, z);
+        const edge = center + side * (channelHalfWidth(plan, z) + offset);
+        vertices.push(edge, height, z, center + side * (channelHalfWidth(plan, z) + offset + span), height, z);
         if (z > -22) { const i = (z + 22) / 6 * 2; indices.push(i - 2, i - 1, i, i - 1, i + 1, i); }
       }
       const geometry = new THREE.BufferGeometry();
@@ -147,7 +172,11 @@ function makeChannelBanks(parent: THREE.Object3D, plan: LevelPlan): void {
       const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide }));
       parent.add(mesh);
     }
-    for (let z = 22; z < 520; z += 42) makeIsland(parent, side * (channelHalfWidth(plan, z) + 9), z, .42 + ((z * 7) % 5) * .035);
+    for (let z = 22; z < 520; z += 42) {
+      const x = channelCenter(plan, z) + side * (channelHalfWidth(plan, z) + 9);
+      if (harbor.biome === 'cove') makeIsland(parent, x, z, .42 + ((z * 7) % 5) * .035);
+      else makeCoastalLandmark(parent, x, z, harbor.biome, harbor.color, z + plan.port);
+    }
   }
 }
 
@@ -167,13 +196,14 @@ function makeIsland(parent: THREE.Object3D, x: number, z: number, scale = 1): vo
   parent.add(island);
 }
 
-function makeHarbour(parent: THREE.Object3D, z: number, destination = false): void {
-  const harbour = new THREE.Group(); harbour.position.z = z;
-  makeIsland(harbour, -12, 0, 1.1); makeIsland(harbour, 12, 2, 0.92);
+function makeHarbour(parent: THREE.Object3D, z: number, destination = false, x = 0, biome: Biome = 'cove', accent = '#e7735a'): void {
+  const harbour = new THREE.Group(); harbour.position.set(x, 0, z);
+  if (biome === 'cove' || biome === 'reef') { makeIsland(harbour, -12, 0, 1.1); makeIsland(harbour, 12, 2, .92); }
+  else { makeCoastalLandmark(harbour, -12, 0, biome, accent, 3); makeCoastalLandmark(harbour, 12, 2, biome, accent, 7); }
   box(harbour, '#aa764d', -7.5, 0.5, 0, 7, 0.68, 3.2);
   for (let i = 0; i < 5; i++) box(harbour, '#775a46', -10.6 + i * 1.5, 0.13, 0, 0.3, 0.7, 0.3);
   box(harbour, destination ? '#f5a2a2' : '#ffd780', -11.8, 2.4, -1.3, 4.25, 3.1, 3.4);
-  const roof = box(harbour, destination ? '#be6183' : '#e7735a', -11.8, 4.22, -1.3, 5, 0.55, 4);
+  const roof = box(harbour, destination ? '#be6183' : accent, -11.8, 4.22, -1.3, 5, 0.55, 4);
   roof.rotation.z = -0.08;
   box(harbour, '#fff4d2', -9.55, 2.52, -1.3, 0.12, 1.3, 1.3);
   for (let i = 0; i < 3; i++) box(harbour, ['#f89069', '#9cd8ad', '#b59cdd'][i], -7.1 + i * 0.9, 1.2, 1.4, 0.8, 0.8, 0.8);
@@ -418,13 +448,18 @@ export class World {
   configureLevel(plan: LevelPlan): void {
     this.plan = plan;
     this.buildRoute();
-    const color = plan.night ? '#0c3f63' : plan.weather === 'storm' ? '#477387' : plan.weather === 'fog' ? '#83b5b9' : palette.water;
+    const sea: Record<Biome, [string, string]> = {
+      cove: ['#087f94', '#2ba9b1'], mist: ['#5b8f9b', '#9dc5c8'], reef: ['#138ca2', '#51c7bb'], lantern: ['#216d86', '#4ba7aa'], star: ['#266b93', '#6bafcc'],
+      marsh: ['#247e7f', '#6cb5a4'], cliff: ['#26778f', '#67b1c2'], pine: ['#207d83', '#65aea3'], ice: ['#4b9cac', '#a3d5d8'], volcanic: ['#496f7e', '#9caeaa'],
+    };
+    const [deep, light] = sea[HARBORS[plan.port].biome];
+    const color = plan.night ? '#0c3f63' : plan.weather === 'storm' ? '#477387' : plan.weather === 'fog' ? '#83b5b9' : deep;
     this.scene.background = new THREE.Color(color);
     this.scene.fog = new THREE.Fog(color, plan.weather === 'fog' ? 35 : 75, plan.weather === 'fog' ? 105 : 150);
     this.renderer.setClearColor(color);
     const water = this.ocean.material as THREE.ShaderMaterial;
-    water.uniforms.uDeep.value.set(plan.night ? '#073e64' : plan.weather === 'storm' ? '#426c7e' : '#087f94');
-    water.uniforms.uLight.value.set(plan.night ? '#246f91' : plan.weather === 'storm' ? '#779ea8' : '#2ba9b1');
+    water.uniforms.uDeep.value.set(plan.night ? '#073e64' : plan.weather === 'storm' ? '#426c7e' : deep);
+    water.uniforms.uLight.value.set(plan.night ? '#246f91' : plan.weather === 'storm' ? '#779ea8' : light);
   }
 
   showShipyard(owned: number[], active: number): void {
@@ -474,7 +509,7 @@ export class World {
   }
 
   beginDocking(x: number, z: number): number {
-    const approach = Math.max(2.2, Math.hypot(x + 1.8, z - 532) / 10.5);
+    const approach = Math.max(2.2, Math.hypot(x - destinationX(this.plan), z - 532) / 10.5);
     this.docking = { fromX: x, fromZ: z, time: 0, approach, parcels: [null, null, null] };
     return approach;
   }
@@ -508,7 +543,9 @@ export class World {
     this.route.clear(); this.hazards.length = 0; this.patrols.length = 0;
     this.fishSchools.length = 0; this.turtles.length = 0; this.gulls.length = 0;
     makeChannelBanks(this.route, this.plan);
-    makeHarbour(this.route, -13); makeHarbour(this.route, 535, true);
+    const harbor = HARBORS[this.plan.port];
+    makeHarbour(this.route, -13, false, channelCenter(this.plan, -13), harbor.biome, harbor.color);
+    makeHarbour(this.route, 535, true, channelCenter(this.plan, 535), harbor.biome, harbor.color);
     for (const hazard of this.plan.hazards) {
       const mesh = hazard.kind === 'rock' ? makeRock(this.route, hazard.x, hazard.z, hazard.radius)
         : hazard.kind === 'sandbank' ? makeSandbank(this.route, hazard.x, hazard.z, hazard.radius)
@@ -549,13 +586,14 @@ export class World {
     for (let i = 0; i < 100; i++) {
       const mark = new THREE.Group();
       const line = box(mark, i % 3 ? '#55bec5' : '#8bd4cf', 0, 0.015, 0, 0.24 + (i % 4) * 0.18, 0.015, 0.04);
-      line.castShadow = false; mark.position.set(((i * 37) % 25) - 12.5, 0, ((i * 73) % 560) - 20);
+      line.castShadow = false; const markZ = ((i * 73) % 560) - 20;
+      mark.position.set(channelCenter(this.plan, markZ) + ((i * 37) % 25) - 12.5, 0, markZ);
       this.scene.add(mark); this.waterMarks.push(mark);
     }
     const colors = ['#205a6d', '#286477', '#2f6d7d', '#315e70'];
     for (let i = 0; i < 10; i++) {
       const baseZ = 18 + i * 52;
-      const baseX = i % 2 ? -6.3 : 6.2;
+      const baseX = channelCenter(this.plan, baseZ) + (i % 2 ? -6.3 : 6.2);
       const school = new THREE.Group();
       const swimmers: Array<{ fish: THREE.Group; tail: THREE.Group; phase: number }> = [];
       for (let j = 0; j < 4; j++) {
@@ -568,11 +606,13 @@ export class World {
     }
     for (let i = 0; i < 6; i++) {
       const turtle = makeTurtle(); this.route.add(turtle.group);
-      this.turtles.push({ ...turtle, baseX: i % 2 ? -9 : 9, baseZ: 42 + i * 84, phase: i * 1.9 });
+      const baseZ = 42 + i * 84;
+      this.turtles.push({ ...turtle, baseX: channelCenter(this.plan, baseZ) + (i % 2 ? -9 : 9), baseZ, phase: i * 1.9 });
     }
     for (let i = 0; i < 8; i++) {
       const gull = makeGull(); this.route.add(gull.group);
-      this.gulls.push({ ...gull, baseX: i % 2 ? -5 : 5, baseZ: 29 + i * 67, phase: i * 1.62 });
+      const baseZ = 29 + i * 67;
+      this.gulls.push({ ...gull, baseX: channelCenter(this.plan, baseZ) + (i % 2 ? -5 : 5), baseZ, phase: i * 1.62 });
     }
   }
 
@@ -604,9 +644,9 @@ export class World {
       const progress = Math.min(1, this.docking.time / this.docking.approach);
       const eased = progress * progress * (3 - 2 * progress);
       const rate = 6 * progress * (1 - progress) / this.docking.approach;
-      x = this.docking.fromX + (-1.8 - this.docking.fromX) * eased;
+      x = this.docking.fromX + (destinationX(this.plan) - this.docking.fromX) * eased;
       z = this.docking.fromZ + (532 - this.docking.fromZ) * eased;
-      vx = (-1.8 - this.docking.fromX) * rate;
+      vx = (destinationX(this.plan) - this.docking.fromX) * rate;
       vz = (532 - this.docking.fromZ) * rate;
       boatSpeed = Math.hypot(vx, vz);
       target = null;
@@ -640,7 +680,7 @@ export class World {
           parcel.visible = false;
           this.docking!.parcels[i] = {
             mesh: clone, start, launch,
-            end: new THREE.Vector3(-7.2 + (i % 2) * 0.8, i === 2 ? 1.54 : 1.08, 535 + (i === 1 ? 0.55 : 0)),
+            end: new THREE.Vector3(channelCenter(this.plan, 535) - 7.2 + (i % 2) * 0.8, i === 2 ? 1.54 : 1.08, 535 + (i === 1 ? 0.55 : 0)),
           };
         }
       });
@@ -657,14 +697,14 @@ export class World {
       if (this.mooringLine.visible) {
         const line = this.mooringLine.geometry.getAttribute('position') as THREE.BufferAttribute;
         line.setXYZ(0, x - 1.15, surface + 0.85, z + 0.65);
-        line.setXYZ(1, -4.3, 0.95, 534.3);
+        line.setXYZ(1, channelCenter(this.plan, 535) - 4.3, 0.95, 534.3);
         line.needsUpdate = true;
       }
       const burstAge = this.docking.time - (this.docking.approach + 2.0);
       this.dockSparkles.forEach(({ mesh, vx: sparkleVx, vy, vz: sparkleVz }) => {
         mesh.visible = burstAge >= 0 && burstAge < 1.25;
         if (!mesh.visible) return;
-        mesh.position.set(-7.0 + sparkleVx * burstAge, 1.5 + vy * burstAge - 3.5 * burstAge * burstAge, 535 + sparkleVz * burstAge);
+        mesh.position.set(channelCenter(this.plan, 535) - 7.0 + sparkleVx * burstAge, 1.5 + vy * burstAge - 3.5 * burstAge * burstAge, 535 + sparkleVz * burstAge);
         mesh.rotation.set(burstAge * 6, burstAge * 5, burstAge * 4);
         (mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 1 - burstAge / 1.25);
       });

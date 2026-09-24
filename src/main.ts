@@ -3,7 +3,7 @@ import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Share } from '@capacitor/share';
 import { World } from './world';
 import { advanceMotion } from './piloting';
-import { clampToChannel, currentPush, levelPlan, MAX_LEVEL, ROUTE_END, weatherPush, type LevelPlan } from './levels';
+import { channelCenter, clampToChannel, currentPush, destinationX, levelPlan, ROUTE_END, weatherPush, type LevelPlan } from './levels';
 import { heardBySoundPatrol, inVisionCone } from './patrols';
 import {
   BOATS, PORTS, HARBORS, SHAPE_NAMES, canFitAll, canPlace, jobById, jobsForPort,
@@ -97,7 +97,7 @@ function piecesForJob(job: Job): Piece[] {
   return job.shapes.map((shape, index) => ({ id: `${job.id}-${index}`, jobId: job.id, shape, rotation: 0, x: null, y: null }));
 }
 
-function jobCard(job: Job, remaining: number): string {
+function jobCard(job: Job, remaining: number, payoutMultiplier: number): string {
   const accepted = jobs.some(item => item.id === job.id);
   const count = job.shapes.reduce((sum, shape) => sum + rotatedCells(shape, 0).length, 0);
   const fits = accepted || (count <= remaining && canFitAll([...pieces, ...piecesForJob(job)], holdWidth(), holdHeight(), boat().blocked));
@@ -105,7 +105,7 @@ function jobCard(job: Job, remaining: number): string {
   const heat = '◆'.repeat(job.heat) + '<span class="heat-empty">◇</span>'.repeat(5 - job.heat);
   return `<article class="job-card ${fits ? '' : 'cannot-fit'}" style="--cargo:${job.color}">
     <div class="job-symbol" aria-hidden="true">${job.icon}</div>
-    <div class="job-content"><div class="job-top"><span class="eyebrow">${job.rare ? '✦ RARE SPECIAL · ' : ''}${escapeHtml(job.client)}</span><span class="job-pay">${money(job.payout)}</span></div>
+    <div class="job-content"><div class="job-top"><span class="eyebrow">${job.rare ? '✦ RARE SPECIAL · ' : ''}${escapeHtml(job.client)}</span><span class="job-pay" title="Includes voyage pay multiplier ×${payoutMultiplier.toFixed(2)}">${money(job.payout * payoutMultiplier)}</span></div>
       <h3>${escapeHtml(job.cargo)}</h3><p>${escapeHtml(job.note)}</p>
       <div class="job-meta"><span>${count} hold cells</span><span>${escapeHtml(job.destination)}</span><span class="heat-rating" aria-label="Patrol heat ${job.heat} out of 5" title="Patrol heat ${job.heat}/5: higher heat makes patrols notice you sooner."><span aria-hidden="true">${heat}</span> HEAT ${job.heat}/5</span>${fits ? '' : `<span class="job-fit-note">${noFitReason}</span>`}</div>
     </div><button class="job-add ${accepted ? 'is-added' : ''} ${fits ? '' : 'is-unavailable'}" type="button" data-action="${accepted ? 'remove-job' : 'add-job'}" data-id="${job.id}" aria-label="${fits ? `${accepted ? 'Remove' : 'Take'} ${escapeHtml(job.cargo)} job` : `${noFitReason} for ${escapeHtml(job.cargo)}`}" ${fits ? '' : 'disabled'}>${accepted ? '✓' : fits ? '+' : count > remaining ? 'FULL' : 'NO FIT'}</button>
@@ -118,8 +118,11 @@ function headerStep(step: string, title: string, subtitle: string): string {
 
 function renderBoard(): void {
   const previousScroll = view.querySelector<HTMLElement>('.board-panel')?.scrollTop ?? 0;
+  if (currentPlan.number !== save.level || currentPlan.port !== save.port) {
+    currentPlan = levelPlan(save.level, save.port); world.configureLevel(currentPlan);
+  }
   const portJobs = availableJobs();
-  const plan = levelPlan(save.level, save.port);
+  const plan = currentPlan;
   const selectedPayout = Math.round(jobs.reduce((sum, job) => sum + job.payout, 0) * plan.payoutMultiplier);
   const totalCells = holdCapacity();
   const usedCells = pieces.reduce((sum, piece) => sum + rotatedCells(piece.shape, 0).length, 0);
@@ -127,14 +130,14 @@ function renderBoard(): void {
   view.innerHTML = `<main class="side-panel board-panel" aria-label="Job board">
     ${headerStep('01 / PICK A DELIVERY', 'The job board', `A little cargo. A little chaos. Sailing from ${PORTS[save.port]}.`)}
     <div class="port-strip"><div class="port-illustration" aria-hidden="true">⚓</div><div><span class="eyebrow">CURRENT PORT</span><strong>${PORTS[save.port]}</strong></div><button class="port-map-link" type="button" data-action="map">View map →</button></div>
-    <div class="level-strip"><span>VOYAGE ${save.level} / ${MAX_LEVEL}</span><strong>${plan.night ? '☾ NIGHT · ' : ''}${plan.weather.toUpperCase()} SEAS</strong><small>${plan.hazards.length} obstacles · ${plan.currents.length} currents · ${plan.patrols.length} patrols · ×${plan.payoutMultiplier.toFixed(2)} pay</small></div>
+    <div class="level-strip"><span>VOYAGE ${save.level} · ${HARBORS[save.port].name.toUpperCase()}</span><strong>${plan.night ? '☾ NIGHT · ' : ''}${plan.weather.toUpperCase()} SEAS</strong><small>${plan.hazards.length} obstacles · ${plan.currents.length} currents · ${plan.patrols.length} patrols · ×${plan.payoutMultiplier.toFixed(2)} pay</small></div>
     <div class="capacity-strip" aria-label="Cargo hold capacity">
       <div class="capacity-main"><div><span class="eyebrow">${boat().name.toUpperCase()} · ${holdWidth()} × ${holdHeight()} HOLD</span><strong>${usedCells} / ${totalCells} cells booked</strong></div><span class="capacity-left">${remainingCells} left</span></div>
       <div class="capacity-meter" role="progressbar" aria-label="Cargo hold cells booked" aria-valuemin="0" aria-valuemax="${totalCells}" aria-valuenow="${usedCells}"><span style="width:${usedCells / totalCells * 100}%"></span></div>
       <p>Jobs use different amounts of space. Crate shapes must fit the outlined hold.</p>
     </div>
     <div class="section-heading"><span>AVAILABLE JOBS · ${portJobs.length} TO PICK FROM</span><details class="heat-guide"><summary aria-label="Patrol heat: more diamonds mean more patrol attention. Show details." title="${heatExplanation}">HEAT? <span aria-hidden="true">ⓘ</span></summary><p>${heatExplanation}</p></details></div>
-    <div class="job-list">${portJobs.map(job => jobCard(job, remainingCells)).join('')}</div>
+    <div class="job-list">${portJobs.map(job => jobCard(job, remainingCells, plan.payoutMultiplier)).join('')}</div>
     <div class="panel-foot"><div class="summary"><span>${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'} aboard</span><strong>${money(selectedPayout)} possible</strong></div>
       <button class="primary-button" type="button" data-action="pack" ${jobs.length ? '' : 'disabled'}>Pack the hold <span>→</span></button>
       <div class="board-links"><button class="text-button" type="button" data-action="yard">⚓ Shipyard</button><button class="text-button" type="button" data-action="market">◈ Boat marketplace</button><button class="text-button" type="button" data-action="map">✦ Harbor map</button></div>
@@ -191,7 +194,7 @@ function renderRun(): void {
   view.innerHTML = `<main class="run-overlay" aria-label="Boat run">
     <div class="weather-layer ${currentPlan.weather} ${currentPlan.night ? 'night' : ''}" aria-hidden="true"></div>
     <div class="run-top"><div class="run-stat"><span>ROUTE</span><strong id="route-progress">0%</strong><div class="meter"><i id="route-fill"></i></div></div><div class="run-stat"><span>HULL</span><strong id="hull-number">100%</strong><div class="meter"><i id="hull-fill"></i></div></div><div class="run-stat heat-stat"><span>HEAT</span><strong id="heat-number">LOW</strong><div class="meter"><i id="heat-fill"></i></div></div></div>
-    <div class="voyage-tag">LEVEL ${currentPlan.number} / ${MAX_LEVEL} · ${currentPlan.night ? 'NIGHT · ' : ''}${currentPlan.weather.toUpperCase()}</div>
+    <div class="voyage-tag">VOYAGE ${currentPlan.number} · ${HARBORS[currentPlan.port].name.toUpperCase()} · ${currentPlan.night ? 'NIGHT · ' : ''}${currentPlan.weather.toUpperCase()}</div>
     <div class="port-compass" role="img" aria-label="Compass pointing toward the destination port"><div class="compass-face"><span class="compass-n">N</span><div id="compass-needle" class="compass-needle">➤</div><span class="compass-harbor">⚓</span></div><div class="compass-copy"><strong>TO PORT</strong><span id="port-distance">520 m</span></div></div>
     <div class="engine-controls"><div id="engine-status" class="engine-status">ENGINE IDLE</div><button class="cut-engine" type="button" data-action="cut-engine" aria-label="Cut engine and coast">✦ CUT ENGINE</button></div>
     <div class="run-bottom"><div class="run-instruction"><strong id="run-instruction-title">DRAG TO PILOT</strong><span id="run-instruction-detail">Tap a spot or drag · release to coast</span></div><div id="run-timer" class="run-timer">00:00</div></div>
@@ -288,7 +291,17 @@ function renderMarket(): void {
   view.querySelector<HTMLElement>('.market-screen')!.scrollTop = previousScroll;
 }
 
+function harborMiniRoute(index: number): string {
+  const plan = levelPlan(1, index);
+  const points = Array.from({ length: 13 }, (_, i) => {
+    const z = i * ROUTE_END / 12;
+    return `${(50 + channelCenter(plan, z) * 1.5).toFixed(1)},${(43 - i * 3.3).toFixed(1)}`;
+  }).join(' ');
+  return `<svg class="map-mini-route" viewBox="0 0 100 50" preserveAspectRatio="none" aria-hidden="true"><polyline points="${points}" fill="none" stroke="#fff8df" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" opacity=".84"/><polyline points="${points}" fill="none" stroke="#398b94" stroke-width="2" stroke-dasharray="2 3"/><circle cx="50" cy="43" r="3" fill="#f8ce6a"/><circle cx="${(50 + channelCenter(plan, ROUTE_END) * 1.5).toFixed(1)}" cy="3.4" r="3" fill="#f78c70"/></svg>`;
+}
+
 function renderMap(): void {
+  const previousScroll = view.querySelector<HTMLElement>('.map-screen')?.scrollTop ?? 0;
   const stops = HARBORS.map((harbor, index) => {
     const unlocked = save.unlockedPorts.includes(index);
     const current = save.port === index;
@@ -296,18 +309,23 @@ function renderMap(): void {
     const requirements = index === 0 ? 'Your first home port' : [index > 1 ? `Unlock ${HARBORS[index - 1].name}` : null, harbor.requiredBoat !== null ? `Own ${BOATS[harbor.requiredBoat].name}` : null, harbor.reputation ? `${harbor.reputation} reputation` : null, harbor.capacity ? `${harbor.capacity}+ cargo cells` : null].filter(Boolean).join(' · ');
     return `<article class="map-stop ${unlocked ? 'unlocked' : 'locked'} ${current ? 'current' : ''}" style="--harbor-color:${harbor.color}">
       <div class="map-island" aria-hidden="true"><span>${harbor.icon}</span></div>
-      <div class="map-stop-body"><span class="eyebrow">STOP ${String(index + 1).padStart(2, '0')} · ${current ? 'CURRENT PORT' : unlocked ? 'UNLOCKED' : 'LOCKED'}</span><h2>${harbor.name}</h2><p>${harbor.subtitle}</p><small>${index === 0 ? 'Open from the start' : `Unlock: ${requirements}`}</small>
+      <div class="map-stop-body"><span class="eyebrow">HARBOR ${String(index + 1).padStart(2, '0')} · ${current ? 'CURRENT PORT' : unlocked ? 'UNLOCKED' : 'LOCKED'}</span><h2>${harbor.name}</h2><p>${harbor.subtitle}</p>
+      <div class="map-mini" title="Unique ${harbor.biome} route map">${harborMiniRoute(index)}<span>${harbor.biome.toUpperCase()} ROUTE</span></div>
+      <small>${index === 0 ? 'Open from the start' : `Unlock: ${requirements}`}</small>
       ${missing.length ? `<div class="map-missing">Still needed: ${missing.join(' · ')}</div>` : ''}
       ${current ? '<span class="fleet-active-label">⚓ Sailing from here</span>' : unlocked ? `<button class="secondary-button" type="button" data-action="select-port" data-id="${index}">Sail from here →</button>` : '<span class="map-lock">🔒 Locked until requirements are met</span>'}</div>
     </article>`;
-  }).join('');
+  });
+  const regionNames = ['The sheltered coast', 'The winding coast', 'The southern reaches', 'The outer islands', 'The far horizon'];
+  const regions = Array.from({ length: 5 }, (_, region) => `<section class="map-region"><div class="map-region-head"><span>CHART ${region + 1} / 5</span><strong>${regionNames[region]}</strong><small>Harbours ${String(region * 5 + 1).padStart(2, '0')}–${String(region * 5 + 5).padStart(2, '0')}</small></div><div class="map-stops">${stops.slice(region * 5, region * 5 + 5).join('')}</div></section>`).join('');
   view.innerHTML = `<main class="atlas-screen map-screen" aria-label="Harbor progression map"><div class="atlas-wrap">
     <div class="atlas-top"><button class="atlas-back" type="button" data-action="board">← Job board</button><span>✦ THE HARBOR CHART</span><button class="atlas-back" type="button" data-action="market">Boat market →</button></div>
-    <div class="atlas-heading"><span class="eyebrow">EXPLORE THE COAST</span><h1>Harbors ahead.</h1><p>Earn reputation, expand your fleet, and chart a course to new ports. Unlocked harbors stay open forever.</p></div>
-    <div class="map-chart"><svg class="map-route" viewBox="0 0 1100 430" preserveAspectRatio="none" aria-hidden="true"><path d="M85 310 C240 150 280 120 330 230 S520 340 580 165 S760 60 820 205 S1000 330 1040 80" fill="none" stroke="#f8f0cf" stroke-width="18" stroke-linecap="round" stroke-dasharray="2 29" opacity=".85"/><path d="M85 310 C240 150 280 120 330 230 S520 340 580 165 S760 60 820 205 S1000 330 1040 80" fill="none" stroke="#547c83" stroke-width="3" stroke-linecap="round" stroke-dasharray="11 16" opacity=".62"/></svg><div class="map-stops">${stops}</div></div>
-    <div class="map-legend"><span><i class="legend-open"></i> Open harbor</span><span><i class="legend-locked"></i> Locked harbor</span><span>★ ${Math.floor(save.reputation)} reputation</span></div>
+    <div class="atlas-heading"><span class="eyebrow">25 DISTINCT COASTS · ENDLESS VOYAGES</span><h1>Harbors ahead.</h1><p>Each harbor has its own coastline, route bends, landmarks and cargo. Unlock them in order, then sail any open harbor as voyages keep changing.</p></div>
+    <div class="map-chart">${regions}</div>
+    <div class="map-legend"><span><i class="legend-open"></i> Open harbor</span><span><i class="legend-locked"></i> Locked harbor</span><span>★ ${Math.floor(save.reputation)} reputation</span><span>${save.unlockedPorts.length} / ${HARBORS.length} discovered</span></div>
     <div class="atlas-bottom"><button class="secondary-button" type="button" data-action="yard">← Shipyard</button><button class="secondary-button" type="button" data-action="board">Job board →</button></div>
   </div></main>`;
+  view.querySelector<HTMLElement>('.map-screen')!.scrollTop = previousScroll;
 }
 
 function render(): void {
@@ -377,10 +395,10 @@ function updateHud(): void {
   const minutes = Math.floor(run.elapsed / 60).toString().padStart(2, '0');
   const seconds = Math.floor(run.elapsed % 60).toString().padStart(2, '0');
   set('run-timer', `${minutes}:${seconds}`);
-  set('port-distance', `${Math.round(Math.hypot(-1.8 - run.x, 532 - run.z))} m`);
+  set('port-distance', `${Math.round(Math.hypot(destinationX(currentPlan) - run.x, 532 - run.z))} m`);
   set('engine-status', run.engineOn ? 'ENGINE ON · PATROLS CAN HEAR' : 'ENGINE CUT · COASTING');
   const needle = document.getElementById('compass-needle');
-  if (needle) needle.style.transform = `translate(-50%, -50%) rotate(${Math.atan2(-1.8 - run.x, 532 - run.z) - run.heading - Math.PI / 2}rad)`;
+  if (needle) needle.style.transform = `translate(-50%, -50%) rotate(${Math.atan2(destinationX(currentPlan) - run.x, 532 - run.z) - run.heading - Math.PI / 2}rad)`;
 }
 
 function endRun(won: boolean, reason: string): void {
@@ -395,7 +413,7 @@ function endRun(won: boolean, reason: string): void {
   const rep = won ? 8 + jobs.length * 4 : -3;
   save.boatCondition[save.boat] = Math.max(30, Math.round(run.hull / run.maxHull * 100));
   save.cash += payout; save.reputation = Math.max(0, save.reputation + rep); save.runs++;
-  if (won) save.level = Math.min(MAX_LEVEL, save.level + 1);
+  if (won) save.level += 1;
   const previouslyOpen = save.unlockedPorts.length;
   refreshHarborUnlocks(save);
   result = { won, reason, payout, base, bonus, adjustment, rep };

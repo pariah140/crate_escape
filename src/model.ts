@@ -1,4 +1,5 @@
-import { MAX_LEVEL } from './levels';
+import { HARBORS } from './harbors';
+export { HARBORS } from './harbors';
 
 export type Phase = 'board' | 'pack' | 'run' | 'result' | 'yard' | 'market' | 'map';
 export type CargoKind = 'standard' | 'bulky' | 'hot' | 'perishable' | 'fragile' | 'vip';
@@ -74,13 +75,6 @@ export const repairCost = (save: SaveData, index = save.boat): number => Math.ce
 );
 export const rareChance = (save: SaveData): number => 0.14 + save.yardUpgrades.brokerDesk * 0.16;
 
-export const HARBORS = [
-  { name: 'Sleepy Cove', subtitle: 'The gentle beginning', color: '#78cba8', icon: '⌂', reputation: 0, capacity: 0, requiredBoat: null },
-  { name: 'Fogbank Harbour', subtitle: 'Mist and mystery', color: '#a7b9d2', icon: '♜', reputation: 0, capacity: 0, requiredBoat: 1 },
-  { name: 'Coral Key', subtitle: 'Bright reefs and bold jobs', color: '#f5a481', icon: '✿', reputation: 25, capacity: 22, requiredBoat: null },
-  { name: 'Lantern Bay', subtitle: 'Night markets on the tide', color: '#dfb57c', icon: '✦', reputation: 70, capacity: 31, requiredBoat: null },
-  { name: 'Starfall Port', subtitle: 'The far end of the chart', color: '#b3a8df', icon: '★', reputation: 140, capacity: 44, requiredBoat: null },
-] as const;
 export const PORTS = HARBORS.map(harbor => harbor.name);
 export function harborRequirements(save: SaveData, index: number): string[] {
   const harbor = HARBORS[index];
@@ -153,7 +147,21 @@ const starfallJobs: Job[] = [
   { id: 'meteor', client: 'The Meteor Museum', cargo: 'Meteor fragments', kind: 'bulky', shapes: ['tee', 'ess', 'line3'], payout: 650, heat: 3, destination: 'Crater Quay', note: 'Heavier than they look.', color: '#a6a9cb', icon: '◈' },
   { id: 'cosmic', client: 'Captain Nobody', cargo: 'Cosmic mystery cases', kind: 'hot', shapes: ['square', 'tee', 'domino'], payout: 740, heat: 5, destination: 'Far Point', note: 'The patrol would like a word.', color: '#d99cba', icon: '?' },
 ];
-const portJobs = [coveJobs, fogJobs, coralJobs, lanternJobs, starfallJobs];
+const generatedJobs: Job[][] = HARBORS.slice(5).map((harbor, offset) => {
+  const port = offset + 5;
+  const kinds: CargoKind[] = ['standard', 'bulky', 'fragile', 'perishable', 'hot'];
+  const shapes: Shape[][] = [['ell', 'domino'], ['tee', 'line3'], ['square', 'domino'], ['ess', 'ell'], ['square', 'tee']];
+  const clients = ['Coastal Workshop', 'Festival Guild', 'Harbor Collector', 'Waterside Kitchen', 'The Night Broker'];
+  const notes = ['A local commission with a long journey.', 'Awkward shapes need a careful hold.', 'Handle gently; a rough voyage lowers the pay.', 'Fresh cargo needs a quick arrival.', 'Patrols are already curious about these crates.'];
+  return harbor.cargo.map((cargo, index) => ({
+    id: `harbor-${port}-${index}`, client: `${harbor.name} ${clients[index]}`, cargo,
+    kind: kinds[index], shapes: shapes[index], payout: 210 + port * 58 + index * 47,
+    heat: Math.min(5, 1 + index), destination: `${harbor.name} ${index % 2 ? 'Jetty' : 'Pier'}`,
+    note: notes[index], color: [harbor.color, '#f3c27c', '#a9cbe0', '#b7d4b5', '#d4a5b9'][index],
+    icon: ['✿', '▣', '◈', '◒', '?'][index],
+  }));
+});
+const portJobs: Job[][] = [coveJobs, fogJobs, coralJobs, lanternJobs, starfallJobs, ...generatedJobs];
 
 const specialJobs: Job[][] = [
   [{ id: 'pearl', client: 'The Pearl Conservatory', cargo: 'Moonlit pearls', kind: 'fragile', shapes: ['tee', 'domino'], payout: 265, heat: 3, destination: 'Starfish Wharf', note: 'Rare commission · handle every crate gently.', color: '#a8dded', icon: '✧', rare: true },
@@ -164,6 +172,15 @@ const specialJobs: Job[][] = [
   [{ id: 'royallantern', client: 'The Royal Lanterns', cargo: 'Golden lanterns', kind: 'vip', shapes: ['square', 'tee', 'single'], payout: 720, heat: 5, destination: 'Palace Pier', note: 'Rare commission · keep the gold centred.', color: '#f2ca75', icon: '✦', rare: true }],
   [{ id: 'constellation', client: 'The Star Cartographers', cargo: 'Constellation charts', kind: 'fragile', shapes: ['square', 'tee', 'ell'], payout: 990, heat: 4, destination: 'North Star Dock', note: 'Rare commission · the charts are one of a kind.', color: '#bed0f1', icon: '★', rare: true }],
 ];
+for (let port = 5; port < HARBORS.length; port++) {
+  const harbor = HARBORS[port];
+  specialJobs.push([{
+    id: `harbor-${port}-rare`, client: `${harbor.name} Cartographers`, cargo: `${harbor.name} secret charts`,
+    kind: 'fragile', shapes: ['square', 'tee', 'domino'], payout: 450 + port * 83, heat: 4,
+    destination: `${harbor.name} Hidden Dock`, note: 'Rare commission · protect these one-of-a-kind charts.',
+    color: harbor.color, icon: '✧', rare: true,
+  }]);
+}
 
 /** One stable offer per completed run. A better broker increases the offer frequency. */
 export function specialOfferFor(save: SaveData): Job | null {
@@ -259,7 +276,7 @@ export function loadSave(): SaveData {
       ownedBoats: owned, port: Number.isInteger(data.port) && data.port! >= 0 && data.port! < HARBORS.length ? data.port! : 0,
       unlockedPorts: [...new Set([0, ...(Array.isArray(data.unlockedPorts) ? data.unlockedPorts : data.port === 1 ? [1] : [])])].filter(index => Number.isInteger(index) && index >= 0 && index < HARBORS.length), boatUpgrades, boatCondition,
       yardUpgrades: { repairBay: Math.max(0, Math.min(3, Number(data.yardUpgrades?.repairBay) || 0)), brokerDesk: Math.max(0, Math.min(3, Number(data.yardUpgrades?.brokerDesk) || 0)) },
-      runs: Math.max(0, Number(data.runs) || 0), level: Math.max(1, Math.min(MAX_LEVEL, Number(data.level) || (Math.max(0, Number(data.runs) || 0) + 1))),
+      runs: Math.max(0, Number(data.runs) || 0), level: Math.max(1, Math.floor(Number(data.level) || (Math.max(0, Number(data.runs) || 0) + 1))),
       soundTutorialSeen: data.soundTutorialSeen === true, sound: typeof data.sound === 'boolean' ? data.sound : initial.sound };
     refreshHarborUnlocks(restored);
     if (!restored.unlockedPorts.includes(restored.port)) restored.port = 0;
