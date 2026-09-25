@@ -126,6 +126,7 @@ function makeBoat(color: string, style: BoatStyle | 'patrol' = 'dinghy'): THREE.
       box(craft, '#ebc889', side * 1.65, 1.77, 1.0, .26, .06, .72).rotation.y = side * .52;
     }
     cylinder(craft, '#f7d370', -.55, 1.83, 1.68, .16, .15);
+    for (const side of [-1, 1]) box(craft, '#e9c681', side * 1.22, .82, .2, .1, .17, 2.9);
   } else if (style === 'speedboat') {
     for (const side of [-1, 1]) box(craft, '#415c72', side * .44, 1.38, back - .08, .3, .46, .5);
     const windscreen = box(craft, '#9ad7dc', 0, 2.1, .52, 1.42, .5, .09); windscreen.rotation.x = -.4;
@@ -140,6 +141,7 @@ function makeBoat(color: string, style: BoatStyle | 'patrol' = 'dinghy'): THREE.
     }
     box(craft, '#f4c87e', 0, 1.8, 1.52, 1.28, .13, .85);
     cylinder(craft, '#f0dfbd', .43, 3.05, cabinZ-.2, .12, .5);
+    for (const side of [-1, 1]) for (const z of [-1.65, 1.45]) cylinder(craft, '#f5e5c5', side * 1.65, 1.42, z, .27, .28, 8);
   } else if (style === 'cruiser') {
     box(craft, '#fff7db', 0, 2.55, cabinZ - .35, 1.5, .15, 1.1);
     for (const side of [-1, 1]) {
@@ -148,12 +150,19 @@ function makeBoat(color: string, style: BoatStyle | 'patrol' = 'dinghy'): THREE.
     }
     box(craft, '#f1bc95', 0, 2.72, -1.3, 1.0, .08, .6);
     cylinder(craft, '#ffdc88', 0, 2.86, -.4, .11, .34);
+    for (const side of [-1, 1]) {
+      cylinder(craft, '#f8f0d5', side * 1.37, 1.72, -.8, .31, .12, 10).rotation.z = Math.PI / 2;
+      cylinder(craft, '#ec9174', side * 1.42, 1.72, -.8, .17, .13, 10).rotation.z = Math.PI / 2;
+    }
   } else if (style === 'freighter') {
     for (const side of [-1, 1]) for (let i = 0; i < 2; i++) box(craft, ['#ecab76', '#8dcaaf', '#e7cf82', '#a8b1de'][(side + 1) + i], side * .72, 2.05 + i * .35, 1.3, 1.25, .33, 1.23);
     cylinder(craft, '#eef3dc', 0, 3.17, cabinZ, .085, 1.1);
     tube(craft, '#566e78', [new THREE.Vector3(-1.25,1.83,2.45),new THREE.Vector3(-1.25,2.35,2.45),new THREE.Vector3(1.25,2.35,2.45)], .04);
     cylinder(craft, '#f3c77b', 1.3, 2.08, 2.27, .18, .55);
     box(craft, '#d3ac70', 0, 1.81, -.65, 2.6, .12, .38);
+    cylinder(craft, '#d5ad70', -1.15, 3.25, -1.35, .08, 1.65);
+    tube(craft, '#d5ad70', [new THREE.Vector3(-1.15,4,-1.35),new THREE.Vector3(.75,4, .3)], .06);
+    tube(craft, '#7a776e', [new THREE.Vector3(.75,4,.3),new THREE.Vector3(.75,2.7,.3)], .025);
   } else if (style === 'skiff') {
     box(craft, '#4c7389', 0, 1.54, back - .12, .55, .46, .38);
     box(craft, '#f6d6a5', 0, 1.72, -.64, 1.42, .13, .3);
@@ -162,6 +171,7 @@ function makeBoat(color: string, style: BoatStyle | 'patrol' = 'dinghy'): THREE.
       box(craft, '#fff5d2', side * .65, 1.67, .2, .12, .11, 2.0);
       cylinder(craft, '#e4b76d', side * .58, 1.81, -1.35, .23, .18);
     }
+    box(craft, '#4f8796', 0, 1.83, .65, .85, .12, .5);
   } else if (style === 'catamaran') {
     box(craft, '#fff3d9', 0, 1.92, -.7, 1.8, .55, 1.3);
     box(craft, '#f0b878', 0, 2.27, -.7, 2.0, .16, 1.52);
@@ -169,6 +179,7 @@ function makeBoat(color: string, style: BoatStyle | 'patrol' = 'dinghy'): THREE.
     for (const side of [-1, 1]) {
       box(craft, '#f4ba7d', side * 1.12, 1.86, 1.25, .3, .17, 1.4);
       tube(craft, '#fff0ca', [new THREE.Vector3(side*1.45,1.7,-1.5),new THREE.Vector3(side*1.45,2.1,-1.5),new THREE.Vector3(side*1.45,2.1,1.55)], .025);
+      box(craft, '#437d88', side * 1.12, .72, -.1, .13, .53, 2.25);
     }
   } else if (style === 'houseboat') {
     const roof = box(craft, '#e9846f', 0, 2.57, cabinZ, 2.35, .19, 2.75);
@@ -181,16 +192,25 @@ function makeBoat(color: string, style: BoatStyle | 'patrol' = 'dinghy'): THREE.
     box(craft, '#9e7656', 0, 2.01, cabinZ + 1.13, .44, .63, .08);
     cylinder(craft, '#d6ac73', -1.0, 1.85, 1.72, .25, .38);
     cone(craft, '#6cb885', -1.0, 2.16, 1.72, .31, .43, 6);
+    for (const side of [-1, 1]) {
+      box(craft, '#d7a86f', side * .76, 1.78, -1.42, .48, .18, .4);
+      cone(craft, '#efaa73', side * .76, 2.06, -1.42, .2, .3, 5);
+    }
   } else if (style === 'clipper') {
     for (const z of [-1.4,1.0]) cylinder(craft, '#aa805b', 0, 3.28, z, .075, 3.2);
     fabricSail(craft, '#fff0d2', 'clipper-main', [new THREE.Vector3(0,4.84,-1.4),new THREE.Vector3(0,2.1,-1.4),new THREE.Vector3(.12,2.15,-2.85)], .17);
     fabricSail(craft, '#f6dba4', 'clipper-fore', [new THREE.Vector3(0,4.83,1),new THREE.Vector3(0,2.1,1),new THREE.Vector3(-.1,2.08,2.62)], -.16);
     box(craft, '#e6c28c', 0, 1.71, 1.67, 1.05, .12, 1.5);
+    cone(craft, '#f3a77e', 0, 5.13, -1.4, .24, .46, 3).rotation.z = Math.PI / 2;
+    cone(craft, '#80c9bc', 0, 5.11, 1.0, .2, .4, 3).rotation.z = Math.PI / 2;
   } else if (style === 'barge') {
     for (const side of [-1, 1]) for (let i = 0; i < 3; i++) box(craft, ['#91bea7', '#e8b785', '#a5a8d1'][i], side * .83, 2.06, -.2 + i * .92, 1.37, .55, .79);
     box(craft, '#6b895d', 0, 2.79, cabinZ, 2.44, .14, 1.58);
     for (const side of [-1, 1]) for (const z of [-1.8, 1.5]) cylinder(craft, '#526a6e', side * 1.94, 1.12, z, .27, .2);
     box(craft, '#eec67a', 0, 1.79, 2.3, 2.0, .14, .36);
+    cylinder(craft, '#d6b37c', 1.1, 3.21, -2.06, .09, 1.85);
+    tube(craft, '#d6b37c', [new THREE.Vector3(1.1,4.1,-2.06),new THREE.Vector3(-.5,4.1,-1.1)], .07);
+    tube(craft, '#6b6865', [new THREE.Vector3(-.5,4.1,-1.1),new THREE.Vector3(-.5,2.66,-1.1)], .025);
   } else if (style === 'sailboat') {
     box(craft, '#4b7280', 0, 1.58, -1.12, 1.08, .09, 1.05);
     box(craft, '#e8be86', 0, 1.68, -1.53, .92, .11, .22);
@@ -203,6 +223,7 @@ function makeBoat(color: string, style: BoatStyle | 'patrol' = 'dinghy'): THREE.
     fabricSail(craft, '#f9d9a0', 'sailboat-jib', [new THREE.Vector3(.02,4.63,.27),new THREE.Vector3(.01,1.92,2.14),new THREE.Vector3(.02,2.1,.74)], -.24);
     tube(craft, '#faf0d7', [new THREE.Vector3(0,5.35,.2),new THREE.Vector3(0,1.87,2.17)], .025);
     box(craft, '#efd3a0', 0, 1.73, 1.82, .6, .07, .33);
+    cone(craft, '#f1b476', 0, 5.5, .22, .17, .29, 3).rotation.z = Math.PI / 2;
   } else {
     cylinder(craft, '#f5f3d9', 0, 1.8, 1.38, .15, .22);
     cone(craft, '#ffce5c', 0, 2.1, 1.38, .25, .35, 5);

@@ -9,7 +9,7 @@ import { heardBySoundPatrol, inVisionCone, sightProfile } from './patrols';
 import {
   BOATS, PORTS, HARBORS, SHAPE_NAMES, canFitAll, canPlace, jobById, jobsForPort,
   loadSave, occupiedCells, persist, rotatedCells, usableCells, isBlocked, boatUpgrade, repairCost, rareChance, specialOfferFor,
-  harborRequirements, refreshHarborUnlocks,
+  harborRequirements, refreshHarborUnlocks, openHarbor, recordHarborDelivery, HARBOR_GATES, estimateCargoPay, voyageReceipt, boatTraits, impactDamage, conditionHandling,
   BACKUP_BOAT_INDEX, MIN_SEAWORTHY_CONDITION,
   type Job, type Phase, type Piece,
 } from './model';
@@ -58,7 +58,7 @@ let hover: { x: number; y: number } | null = null;
 let dragPiece: string | null = null;
 let dragMoved = false;
 let run: RunState | null = null;
-let result: { won: boolean; reason: string; payout: number; base: number; bonus: number; adjustment: number; rep: number } | null = null;
+let result: { won: boolean; reason: string; payout: number; base: number; bonus: number; adjustment: number; service: number; rep: number } | null = null;
 let toastTimer = 0;
 let lastHud = 0;
 let audioContext: AudioContext | null = null;
@@ -72,6 +72,7 @@ const availableJobs = () => jobsForPort(save.port, specialOfferFor(save));
 const money = (value: number) => `$${Math.round(value).toLocaleString()}`;
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 const heatExplanation = 'More diamonds mean more patrol attention. A 1/5 job is quiet; a 5/5 job starts hotter and patrols spot you sooner. Hot cargo cools down more slowly.';
+const yardPrices = { repairBay: [600, 1200, 2200], brokerDesk: [800, 1800, 3500] };
 
 function beep(frequency: number, length = 0.08, type: OscillatorType = 'sine'): void {
   if (!save.sound) return;
@@ -100,7 +101,7 @@ function piecesForJob(job: Job): Piece[] {
   return job.shapes.map((shape, index) => ({ id: `${job.id}-${index}`, jobId: job.id, shape, rotation: 0, x: null, y: null }));
 }
 
-function jobCard(job: Job, remaining: number, payoutMultiplier: number): string {
+function jobCard(job: Job, remaining: number): string {
   const accepted = jobs.some(item => item.id === job.id);
   const count = job.shapes.reduce((sum, shape) => sum + rotatedCells(shape, 0).length, 0);
   const fits = accepted || (count <= remaining && canFitAll([...pieces, ...piecesForJob(job)], holdWidth(), holdHeight(), boat().blocked));
@@ -108,7 +109,7 @@ function jobCard(job: Job, remaining: number, payoutMultiplier: number): string 
   const heat = '◆'.repeat(job.heat) + '<span class="heat-empty">◇</span>'.repeat(5 - job.heat);
   return `<article class="job-card ${fits ? '' : 'cannot-fit'}" style="--cargo:${job.color}">
     <div class="job-symbol" aria-hidden="true">${job.icon}</div>
-    <div class="job-content"><div class="job-top"><span class="eyebrow">${job.rare ? '✦ RARE SPECIAL · ' : ''}${escapeHtml(job.client)}</span><span class="job-pay" title="Includes voyage pay multiplier ×${payoutMultiplier.toFixed(2)}">${money(job.payout * payoutMultiplier)}</span></div>
+    <div class="job-content"><div class="job-top"><span class="eyebrow">${job.rare ? '✦ RARE SPECIAL · ' : ''}${escapeHtml(job.client)}</span><span class="job-pay" title="Estimated cargo pay for this job alone, before service and damage">~${money(estimateCargoPay(save.port, [job], boat()))}</span></div>
       <h3>${escapeHtml(job.cargo)}</h3><p>${escapeHtml(job.note)}</p>
       <div class="job-meta"><span>${count} hold cells</span><span>${escapeHtml(job.destination)}</span><span class="heat-rating" aria-label="Patrol heat ${job.heat} out of 5" title="Patrol heat ${job.heat}/5: higher heat makes patrols notice you sooner."><span aria-hidden="true">${heat}</span> HEAT ${job.heat}/5</span>${fits ? '' : `<span class="job-fit-note">${noFitReason}</span>`}</div>
     </div><button class="job-add ${accepted ? 'is-added' : ''} ${fits ? '' : 'is-unavailable'}" type="button" data-action="${accepted ? 'remove-job' : 'add-job'}" data-id="${job.id}" aria-label="${fits ? `${accepted ? 'Remove' : 'Take'} ${escapeHtml(job.cargo)} job` : `${noFitReason} for ${escapeHtml(job.cargo)}`}" ${fits ? '' : 'disabled'}>${accepted ? '✓' : fits ? '+' : count > remaining ? 'FULL' : 'NO FIT'}</button>
@@ -126,14 +127,15 @@ function renderBoard(): void {
   }
   const portJobs = availableJobs();
   const plan = currentPlan;
-  const selectedPayout = Math.round(jobs.reduce((sum, job) => sum + job.payout, 0) * plan.payoutMultiplier);
+  const selectedPayout = estimateCargoPay(save.port, jobs, boat());
   const totalCells = holdCapacity();
   const usedCells = pieces.reduce((sum, piece) => sum + rotatedCells(piece.shape, 0).length, 0);
   const remainingCells = totalCells - usedCells;
   view.innerHTML = `<main class="side-panel board-panel" aria-label="Job board">
     ${headerStep('01 / PICK A DELIVERY', 'The job board', `A little cargo. A little chaos. Sailing from ${PORTS[save.port]}.`)}
     <div class="port-strip"><div class="port-illustration" aria-hidden="true">⚓</div><div><span class="eyebrow">CURRENT PORT</span><strong>${PORTS[save.port]}</strong></div><button class="port-map-link" type="button" data-action="map">View map →</button></div>
-    <div class="level-strip"><span>VOYAGE ${save.level} · ${HARBORS[save.port].name.toUpperCase()}</span><strong>${plan.night ? '☾ NIGHT · ' : ''}${plan.weather.toUpperCase()} SEAS</strong><small>${plan.hazards.length} obstacles · ${plan.currents.length} currents · ${plan.patrols.length} patrols · ×${plan.payoutMultiplier.toFixed(2)} pay</small></div>
+    <div class="level-strip"><span>VOYAGE ${save.level} · ${HARBORS[save.port].name.toUpperCase()}</span><strong>${plan.night ? '☾ NIGHT · ' : ''}${plan.weather.toUpperCase()} SEAS</strong><small>${plan.hazards.length} obstacles · ${plan.currents.length} currents · ${plan.patrols.length} patrols</small></div>
+    <div class="ability-ribbon"><strong>✦ ${boat().ability}</strong><span>${boat().abilityDetail}</span></div>
     <div class="capacity-strip" aria-label="Cargo hold capacity">
       <div class="capacity-main"><div><span class="eyebrow">${boat().name.toUpperCase()} · ${holdWidth()} × ${holdHeight()} HOLD</span><strong>${usedCells} / ${totalCells} cells booked</strong></div><span class="capacity-left">${remainingCells} left</span></div>
       <div class="capacity-meter" role="progressbar" aria-label="Cargo hold cells booked" aria-valuemin="0" aria-valuemax="${totalCells}" aria-valuenow="${usedCells}"><span style="width:${usedCells / totalCells * 100}%"></span></div>
@@ -141,8 +143,8 @@ function renderBoard(): void {
     </div>
     ${save.boat !== BACKUP_BOAT_INDEX && (save.boatCondition[save.boat] ?? 100) < MIN_SEAWORTHY_CONDITION ? `<div class="boat-repair-warning">⚒ ${boat().name} is at ${save.boatCondition[save.boat]}% condition and needs repairs before sailing. <button type="button" data-action="yard">Open the shipyard →</button></div>` : ''}
     <div class="section-heading"><span>AVAILABLE JOBS · ${portJobs.length} TO PICK FROM</span><details class="heat-guide"><summary aria-label="Patrol heat: more diamonds mean more patrol attention. Show details." title="${heatExplanation}">HEAT? <span aria-hidden="true">ⓘ</span></summary><p>${heatExplanation}</p></details></div>
-    <div class="job-list">${portJobs.map(job => jobCard(job, remainingCells, plan.payoutMultiplier)).join('')}</div>
-    <div class="panel-foot"><div class="summary"><span>${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'} aboard</span><strong>${money(selectedPayout)} possible</strong></div>
+    <div class="job-list">${portJobs.map(job => jobCard(job, remainingCells)).join('')}</div>
+    <div class="panel-foot"><div class="summary"><span>${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'} aboard</span><strong>~${money(selectedPayout)} cargo pay</strong></div>
       <button class="primary-button" type="button" data-action="pack" ${jobs.length ? '' : 'disabled'}>Pack the hold <span>→</span></button>
       <div class="board-links"><button class="text-button" type="button" data-action="yard">⚓ Shipyard</button><button class="text-button" type="button" data-action="market">◈ Boat marketplace</button><button class="text-button" type="button" data-action="map">✦ Harbor map</button></div>
     </div>
@@ -216,7 +218,7 @@ function renderResult(): void {
     <div class="result-icon" aria-hidden="true">${icon}</div><span class="eyebrow">${result.won ? 'DELIVERY COMPLETE' : 'RUN ENDED'}</span>
     <h1>${result.won ? 'Made it in one piece!' : result.reason === 'caught' ? 'Caught by the Patrol!' : 'The boat took a bath.'}</h1>
     <p>${result.won ? 'The cargo is ashore and nobody asked any questions.' : 'The cargo is gone. Your boat is back at the yard for repairs; its upgrades are safe.'}</p>
-    ${result.won ? `<div class="receipt"><div><span>Delivery pay</span><strong>${money(result.base)}</strong></div><div><span>Perfect Pack</span><strong>+${money(result.bonus)}</strong></div>${result.adjustment ? `<div><span>Cargo wear / delay</span><strong>−${money(result.adjustment)}</strong></div>` : ''}<div class="receipt-total"><span>Cash earned</span><strong>${money(result.payout)}</strong></div></div><div class="rep-note">★ +${result.rep} reputation</div>` : `<div class="failure-note">No payout this time · -${Math.abs(result.rep)} reputation</div>`}
+    ${result.won ? `<div class="receipt"><div><span>Cargo pay</span><strong>${money(result.base)}</strong></div><div><span>Perfect pack</span><strong>+${money(result.bonus)}</strong></div>${result.adjustment ? `<div><span>Cargo wear / delay</span><strong>−${money(result.adjustment)}</strong></div>` : ''}<div><span>Harbour service · 10%</span><strong>−${money(result.service)}</strong></div><div class="receipt-total"><span>Cash earned</span><strong>${money(result.payout)}</strong></div></div><div class="rep-note">★ +${result.rep} reputation · charter progress saved</div>` : `<div class="failure-note">No payout this time · -${Math.abs(result.rep)} reputation</div>`}
     <button class="primary-button" type="button" data-action="next">${result.won ? 'Next delivery' : 'Try again'} <span>→</span></button>
     ${result.won ? '<button class="secondary-button full share-button" type="button" data-action="share">Share this run ↗</button>' : ''}
     <button class="text-button" type="button" data-action="yard">Visit the shipyard ↗</button>
@@ -231,7 +233,20 @@ function holdDiagram(index: number): string {
 function boatIcon(index: number): string {
   const craft = BOATS[index];
   const contours = ['0,3 17,0 48,3 63,14 48,25 17,28 0,25', '0,11 15,3 46,0 67,14 46,28 15,25', '0,4 13,0 53,0 70,14 53,28 13,28 0,24', '0,9 12,1 56,0 72,14 56,28 12,27', '0,5 12,1 64,1 76,14 64,27 12,27 0,23', '0,12 19,5 51,3 73,14 51,25 19,23', '1,7 18,2 57,2 74,14 57,26 18,26 1,21', '0,5 13,1 60,1 73,14 60,27 13,27 0,23', '0,13 26,2 58,1 78,14 58,27 26,26', '0,3 13,1 66,1 80,14 66,27 13,27 0,25', '0,11 17,3 46,3 64,14 46,25 17,25'];
-  return `<svg class="yard-silhouette" viewBox="-2 -2 82 32" aria-hidden="true"><polygon points="${contours[index]}" fill="${craft.color}" stroke="#31576c" stroke-width="2"/><path d="M18 6h28v16H18z" fill="#fff4da" opacity=".88"/><path d="M30 8h9v12h-9z" fill="#80c8ca"/></svg>`;
+  const fittings = [
+    '<path d="M18 3v22m21-20v18" stroke="#926d4d" stroke-width="3"/><path d="M12 15h38" stroke="#f8dda9" stroke-width="2"/>',
+    '<path d="M16 8h22l10 6-10 6H16z" fill="#fff4d7"/><path d="M27 9h13v10H27z" fill="#83cdd7"/><circle cx="8" cy="11" r="3" fill="#486c84"/><circle cx="8" cy="19" r="3" fill="#486c84"/>',
+    '<path d="M18 5h27v18H18z" fill="#fff3d8"/><path d="M27 7h13v8H27z" fill="#82bac7"/><path d="M12 2v25m44-23v22" stroke="#9d7852" stroke-width="2"/><circle cx="11" cy="14" r="3" fill="#eac380"/>',
+    '<path d="M14 6h38v16H14z" fill="#fff1d8"/><path d="M18 9h26v10H18z" fill="#8bc9d6"/><path d="M54 6v16" stroke="#fff3d3" stroke-width="3"/>',
+    '<rect x="15" y="5" width="21" height="8" rx="1" fill="#edab77"/><rect x="15" y="15" width="21" height="8" rx="1" fill="#8ac7ab"/><rect x="42" y="7" width="17" height="15" rx="2" fill="#fff2d7"/>',
+    '<path d="M17 12h32" stroke="#fff1d3" stroke-width="3"/><path d="M19 18h25" stroke="#a4694d" stroke-width="3"/><circle cx="9" cy="14" r="3" fill="#4c7188"/>',
+    '<path d="M1 6L20 5l44 0 10 4M1 22l19 2h44l10-4" fill="none" stroke="#31576c" stroke-width="3"/><rect x="23" y="7" width="29" height="15" rx="2" fill="#fff1d6"/><path d="M30 10h14v8H30z" fill="#91cdd2"/>',
+    '<rect x="16" y="4" width="38" height="21" rx="3" fill="#fff1d7"/><path d="M20 5h30v5H20z" fill="#df856c"/><path d="M23 14h9m5 0h9" stroke="#80bfd0" stroke-width="4"/><circle cx="11" cy="22" r="3" fill="#77b688"/>',
+    '<path d="M25 14h42" stroke="#9f754e" stroke-width="2"/><path d="M29 14L46 2v12z" fill="#fff4d9"/><path d="M45 14L60 3v11z" fill="#f4d9a1"/><path d="M21 21h35" stroke="#fff1d6" stroke-width="2"/>',
+    '<rect x="13" y="4" width="18" height="9" rx="1" fill="#90bda4"/><rect x="34" y="4" width="21" height="9" rx="1" fill="#e4b482"/><rect x="13" y="15" width="20" height="9" rx="1" fill="#a7a8ce"/><rect x="36" y="15" width="21" height="9" rx="1" fill="#f0cf8c"/>',
+    '<path d="M15 14h41" stroke="#9b7151" stroke-width="2"/><path d="M33 14L49 3v11z" fill="#fff8e4"/><path d="M34 15L23 24V15z" fill="#e7a578"/><circle cx="13" cy="14" r="2" fill="#f6d397"/>',
+  ];
+  return `<svg class="yard-silhouette" viewBox="-2 -2 82 32" aria-hidden="true"><polygon points="${contours[index]}" transform="translate(0 2)" fill="#31576c" opacity=".35"/><polygon points="${contours[index]}" fill="${craft.color}" stroke="#31576c" stroke-width="2"/>${fittings[index]}</svg>`;
 }
 
 function renderYard(): void {
@@ -242,8 +257,8 @@ function renderYard(): void {
   const speedPrice = 90 + (upgrade?.engine ?? 0) * 75;
   const hullPrice = 85 + (upgrade?.hull ?? 0) * 70;
   const repair = inspected === null ? 0 : repairCost(save, inspected);
-  const workshopPrice = 160 + save.yardUpgrades.repairBay * 190;
-  const brokerPrice = 220 + save.yardUpgrades.brokerDesk * 260;
+  const workshopPrice = yardPrices.repairBay[save.yardUpgrades.repairBay] ?? 0;
+  const brokerPrice = yardPrices.brokerDesk[save.yardUpgrades.brokerDesk] ?? 0;
   const cards = BOATS.map((craft, index) => {
     const owned = save.ownedBoats.includes(index);
     if (!owned) return '';
@@ -251,7 +266,7 @@ function renderYard(): void {
     const state = save.boatCondition[index] ?? 100;
     return `<article class="fleet-card ${active ? 'active' : ''} ${inspected === index ? 'inspected' : ''}">
       <div class="fleet-card-top">${boatIcon(index)}<div><span class="eyebrow">${active ? 'ACTIVE BOAT' : owned ? 'IN YOUR FLEET' : 'NEW BOAT'}</span><h3>${craft.name}</h3><p>${craft.description}</p></div></div>
-      <div class="fleet-card-bottom">${holdDiagram(index)}<div class="fleet-facts"><span><strong>${usableCells(craft)}</strong> cargo cells</span><span><strong>${Math.round(craft.speed * 100)}%</strong> speed · ${craft.handling}</span><span><strong>${craft.hull}</strong> hull · ${owned ? `${state}% condition` : `${money(craft.price)} to buy`}</span></div></div>
+      <div class="fleet-card-bottom">${holdDiagram(index)}<div class="fleet-facts"><span><strong>${usableCells(craft)}</strong> cargo cells</span><span><strong>${Math.round(craft.speed * 100)}%</strong> speed · ${craft.handling}</span><span><strong>${craft.hull}</strong> hull · ${owned ? `${state}% condition` : `${money(craft.price)} to buy`}</span></div></div><div class="boat-ability"><strong>✦ ${craft.ability}</strong><span>${craft.abilityDetail}</span></div>
       <button class="secondary-button" type="button" data-action="inspect-boat" data-id="${index}" aria-label="Inspect ${craft.name}">${inspected === index ? 'Viewing boat ✓' : 'Inspect boat ↗'}</button>
     </article>`;
   }).join('');
@@ -262,7 +277,7 @@ function renderYard(): void {
     <div class="section-heading"><span>YOUR FLEET & BOATYARD</span><span>${save.ownedBoats.length}/${BOATS.length} OWNED</span></div>
     <div class="fleet-list">${cards}</div>
     ${inspectedBoat && upgrade ? `<div class="section-heading"><span>${inspectedBoat.name.toUpperCase()} · INSPECTION</span><button class="yard-back" type="button" data-action="yard-overview">← ALL BOATS</button></div>
-    <div class="inspection-card"><strong>${save.boatCondition[inspected!] ?? 100}% condition</strong><span>${usableCells(inspectedBoat)} cargo cells · ${inspectedBoat.handling}</span><span>${inspected === BACKUP_BOAT_INDEX ? 'Always free to sail · no repair bill' : (save.boatCondition[inspected!] ?? 100) < MIN_SEAWORTHY_CONDITION ? 'Needs repairs before sailing' : 'Seaworthy'}</span>${save.boat === inspected ? '<span class="fleet-active-label">✓ Active boat</span>' : `<button class="secondary-button" type="button" data-action="switch-boat" data-id="${inspected}" ${inspected !== BACKUP_BOAT_INDEX && (save.boatCondition[inspected!] ?? 100) < MIN_SEAWORTHY_CONDITION ? 'disabled' : ''}>${inspected !== BACKUP_BOAT_INDEX && (save.boatCondition[inspected!] ?? 100) < MIN_SEAWORTHY_CONDITION ? 'Repair to sail' : 'Use this boat'}</button>`}</div>
+    <div class="inspection-card"><strong>${save.boatCondition[inspected!] ?? 100}% condition</strong><span>${usableCells(inspectedBoat)} cargo cells · ${inspectedBoat.handling}</span><span>✦ ${inspectedBoat.ability}: ${inspectedBoat.abilityDetail}</span><span>${inspected === BACKUP_BOAT_INDEX ? 'Always free to sail · no repair bill' : (save.boatCondition[inspected!] ?? 100) < MIN_SEAWORTHY_CONDITION ? 'Needs repairs before sailing' : 'Seaworthy'}</span>${save.boat === inspected ? '<span class="fleet-active-label">✓ Active boat</span>' : `<button class="secondary-button" type="button" data-action="switch-boat" data-id="${inspected}" ${inspected !== BACKUP_BOAT_INDEX && (save.boatCondition[inspected!] ?? 100) < MIN_SEAWORTHY_CONDITION ? 'disabled' : ''}>${inspected !== BACKUP_BOAT_INDEX && (save.boatCondition[inspected!] ?? 100) < MIN_SEAWORTHY_CONDITION ? 'Repair to sail' : 'Use this boat'}</button>`}</div>
     <div class="upgrade-list">
       ${inspected === BACKUP_BOAT_INDEX ? '<p class="backup-note">The backup sailboat is always ready and free to repair. Earn with small deliveries, then restore your main boat.</p>' : `<div class="upgrade"><div><span class="upgrade-icon">↗</span><strong>Better engine</strong><small>+9% speed · level ${upgrade.engine}/3</small></div><button class="buy-button" type="button" data-action="engine" ${upgrade.engine >= 3 || save.cash < speedPrice ? 'disabled' : ''}>${upgrade.engine >= 3 ? 'MAX' : money(speedPrice)}</button></div>
       <div class="upgrade"><div><span class="upgrade-icon">♥</span><strong>Reinforced hull</strong><small>+15 hull · level ${upgrade.hull}/3</small></div><button class="buy-button" type="button" data-action="hull" ${upgrade.hull >= 3 || save.cash < hullPrice ? 'disabled' : ''}>${upgrade.hull >= 3 ? 'MAX' : money(hullPrice)}</button></div>
@@ -288,7 +303,7 @@ function renderMarket(): void {
       <div class="market-art"><span class="market-number">NO. ${String(position + 1).padStart(2, '0')}</span>${boatIcon(index)}<span class="market-badge">${owned ? active ? 'SAILING' : 'OWNED' : money(craft.price)}</span></div>
       <div class="market-body"><h2>${craft.name}</h2><p>${craft.description}</p>
       <div class="market-hold">${holdDiagram(index)}<span><strong>${usableCells(craft)} cells</strong><small>${craft.width} × ${craft.height} shaped hold</small></span></div>
-      <div class="market-stats"><span><strong>${Math.round(craft.speed * 100)}%</strong><small>Speed</small></span><span><strong>${craft.handling}</strong><small>Steering</small></span><span><strong>${craft.hull}</strong><small>Hull</small></span></div>
+      <div class="market-stats"><span><strong>${Math.round(craft.speed * 100)}%</strong><small>Speed</small></span><span><strong>${craft.handling}</strong><small>Steering</small></span><span><strong>${craft.hull}</strong><small>Hull</small></span></div><div class="boat-ability"><strong>✦ ${craft.ability}</strong><span>${craft.abilityDetail}</span></div>
       ${active ? '<span class="fleet-active-label">✓ Your active boat</span>' : owned ? `<button class="secondary-button full" type="button" data-action="switch-boat" data-id="${index}" ${index !== BACKUP_BOAT_INDEX && (save.boatCondition[index] ?? 100) < MIN_SEAWORTHY_CONDITION ? 'disabled' : ''}>${index !== BACKUP_BOAT_INDEX && (save.boatCondition[index] ?? 100) < MIN_SEAWORTHY_CONDITION ? 'Repair to sail' : 'Use this boat'}</button>` : `<button class="primary-button full" type="button" data-action="buy-boat" data-id="${index}" ${save.cash < craft.price ? 'disabled' : ''}>Buy for ${money(craft.price)}</button>`}</div>
     </article>`;
   }).join('');
@@ -316,14 +331,17 @@ function renderMap(): void {
     const unlocked = save.unlockedPorts.includes(index);
     const current = save.port === index;
     const missing = unlocked ? [] : harborRequirements(save, index);
-    const requirements = index === 0 ? 'Your first home port' : [index > 1 ? `Unlock ${HARBORS[index - 1].name}` : null, harbor.requiredBoat !== null ? `Own ${BOATS[harbor.requiredBoat].name}` : null, harbor.reputation ? `${harbor.reputation} reputation` : null, harbor.capacity ? `${harbor.capacity}+ cargo cells` : null].filter(Boolean).join(' · ');
+    const gate = HARBOR_GATES[index];
+    const record = save.harborRecords[index - 1];
+    const requirements = index === 0 ? 'Your first home port' : `${gate.runs} ${HARBORS[index - 1].name} deliveries · 2 cargo types · 1 clean run · ${gate.capacity}+ cell boat · ${money(gate.fee)} outfitting`;
     return `<article class="map-stop ${unlocked ? 'unlocked' : 'locked'} ${current ? 'current' : ''}" style="--harbor-color:${harbor.color}">
       <div class="map-island" aria-hidden="true"><span>${harbor.icon}</span></div>
       <div class="map-stop-body"><span class="eyebrow">HARBOR ${String(index + 1).padStart(2, '0')} · ${current ? 'CURRENT PORT' : unlocked ? 'UNLOCKED' : 'LOCKED'}</span><h2>${harbor.name}</h2><p>${harbor.subtitle}</p>
       <div class="map-mini" title="Unique ${harbor.biome} route map">${harborMiniRoute(index)}<span>${harbor.biome.toUpperCase()} ROUTE</span></div>
       <small>${index === 0 ? 'Open from the start' : `Unlock: ${requirements}`}</small>
+      ${!unlocked && index > 0 ? `<div class="charter-progress"><strong>${Math.min(record?.deliveries ?? 0, gate.runs)}/${gate.runs} deliveries</strong><span>${Math.min(record?.cargoKinds.length ?? 0, 2)}/2 cargo types · ${record?.clean ? '✓ clean run' : 'clean run needed'}</span></div>` : ''}
       ${missing.length ? `<div class="map-missing">Still needed: ${missing.join(' · ')}</div>` : ''}
-      ${current ? '<span class="fleet-active-label">⚓ Sailing from here</span>' : unlocked ? `<button class="secondary-button" type="button" data-action="select-port" data-id="${index}">Sail from here →</button>` : '<span class="map-lock">🔒 Locked until requirements are met</span>'}</div>
+      ${current ? '<span class="fleet-active-label">⚓ Sailing from here</span>' : unlocked ? `<button class="secondary-button" type="button" data-action="select-port" data-id="${index}">Sail from here →</button>` : missing.length === 0 ? `<button class="primary-button" type="button" data-action="open-port" data-id="${index}">Outfit & open · ${money(gate.fee)} →</button>` : '<span class="map-lock">🔒 Complete the charter to open</span>'}</div>
     </article>`;
   });
   const regionNames = ['The sheltered coast', 'The winding coast', 'The southern reaches', 'The outer islands', 'The far horizon'];
@@ -391,7 +409,7 @@ function beginRun(): void {
   const maxHull = boat().hull + boatUpgrade(save).hull * 15;
   const patrolHeat = jobs.reduce((sum, job) => sum + job.heat, 0);
   const hotCargo = jobs.some(job => job.kind === 'hot');
-  run = { x: 0, z: 0, vx: 0, vz: 0, speed: 0, hull: maxHull * (save.boatCondition[save.boat] ?? 100) / 100, maxHull, heat: Math.min(65, patrolHeat * 4 + (hotCargo ? 8 : 0)), contact: 0, damageCooldown: 0, collisions: 0, elapsed: 0, holding: false, pointer: null, pointerX: 0, pointerY: 0, pointerStartX: 0, pointerStartY: 0, pointerDownAt: 0, pointerMoved: false, dragOriginX: 0, dragOriginZ: 0, tapTarget: null, deadline: jobs.some(job => job.kind === 'perishable') ? 25 + currentPlan.routeEnd / 5.2 : Infinity, patrolHeat, hotCargo, ending: false, heading: 0, engineOn: false, lightsOn: currentPlan.night, tutorialOpen: false, tutorialPending: currentPlan.patrols.some(patrol => patrol.sound) && !save.soundTutorialSeen, soundExposure: 0, offshoreTime: 0 };
+  run = { x: 0, z: 0, vx: 0, vz: 0, speed: 0, hull: maxHull * (save.boatCondition[save.boat] ?? 100) / 100, maxHull, heat: Math.min(65, patrolHeat * 4 + (hotCargo ? 8 : 0)), contact: 0, damageCooldown: 0, collisions: 0, elapsed: 0, holding: false, pointer: null, pointerX: 0, pointerY: 0, pointerStartX: 0, pointerStartY: 0, pointerDownAt: 0, pointerMoved: false, dragOriginX: 0, dragOriginZ: 0, tapTarget: null, deadline: jobs.some(job => job.kind === 'perishable') ? (25 + currentPlan.routeEnd / 5.2) * boatTraits(boat()).deadline : Infinity, patrolHeat, hotCargo, ending: false, heading: 0, engineOn: false, lightsOn: currentPlan.night, tutorialOpen: false, tutorialPending: currentPlan.patrols.some(patrol => patrol.sound) && !save.soundTutorialSeen, soundExposure: 0, offshoreTime: 0 };
   world.setNightLighting(currentPlan.night, run.lightsOn);
   heldKeys.clear(); phase = 'run'; render(); beep(400, 0.15, 'triangle'); notify('Cargo aboard. Tap the water or drag to pilot!', 'success');
 }
@@ -443,27 +461,23 @@ function updateHud(): void {
 
 function endRun(won: boolean, reason: string): void {
   if (!run || phase !== 'run') return;
-  const base = Math.round(jobs.reduce((sum, job) => sum + job.payout, 0) * currentPlan.payoutMultiplier);
   const full = pieces.reduce((sum, piece) => sum + occupiedCells(piece).length, 0) === holdCapacity();
-  const bonus = won && full ? Math.round(base * 0.1) : 0;
-  let payout = won ? base + bonus : 0;
-  if (won && jobs.some(job => job.kind === 'fragile')) payout = Math.max(0, payout - Math.round(base * Math.min(run.collisions * 0.2, 0.8)));
-  if (won && jobs.some(job => job.kind === 'perishable') && run.elapsed > run.deadline) payout = Math.round(payout * 0.7);
-  const adjustment = won ? base + bonus - payout : 0;
-  const rep = won ? 8 + jobs.length * 4 : -3;
+  const receipt = won ? voyageReceipt(save.port, jobs, boat(), full, run.collisions, run.elapsed > run.deadline) : { base: 0, bonus: 0, adjustment: 0, service: 0, payout: 0 };
+  const { base, bonus, adjustment, service, payout } = receipt;
+  const rep = won ? 3 + jobs.length + (run.collisions === 0 ? 2 : 0) : -2;
   save.boatCondition[save.boat] = save.boat === BACKUP_BOAT_INDEX ? 100 : Math.max(30, Math.round(run.hull / run.maxHull * 100));
   save.cash += payout; save.reputation = Math.max(0, save.reputation + rep); save.runs++;
+  if (won) { recordHarborDelivery(save, save.port, jobs, run.collisions === 0 && run.elapsed <= run.deadline); save.offerCycle++; }
   const backupNeeded = save.boat !== BACKUP_BOAT_INDEX && save.boatCondition[save.boat] < MIN_SEAWORTHY_CONDITION && save.cash < repairCost(save);
   if (backupNeeded) { save.boat = BACKUP_BOAT_INDEX; world.setBoat(boat()); }
   if (won) save.level += 1;
-  const previouslyOpen = save.unlockedPorts.length;
   refreshHarborUnlocks(save);
-  result = { won, reason, payout, base, bonus, adjustment, rep };
+  result = { won, reason, payout, base, bonus, adjustment, service, rep };
   run = null; phase = 'result'; saveProgress(); render();
   beep(won ? 660 : 180, 0.25, won ? 'triangle' : 'sawtooth');
   if (won) window.setTimeout(() => beep(880, 0.22, 'triangle'), 110);
   if (backupNeeded) notify('Repairs are out of reach. Your free Patchwork Sailboat is ready for the next delivery.');
-  else if (save.unlockedPorts.length > previouslyOpen) notify(`${PORTS[save.unlockedPorts.at(-1)!]} unlocked! Open the harbor map.`, 'success');
+  else if (won && harborRequirements(save, save.port + 1).length === 0) notify(`${PORTS[save.port + 1]} is ready to outfit on the harbor map.`, 'success');
 }
 
 function showImpact(label: string): void {
@@ -523,12 +537,14 @@ function updateRun(dt: number): void {
   run.engineOn = Boolean(target || dx || dz);
   const nearListeningBoat = world.patrols.some(patrol => patrol.sound && Math.hypot(run!.x - patrol.x, run!.z - patrol.z) < 19);
   const presentOffshore = offshoreState(currentPlan, run.x, run.z);
+  const conditionFactor = save.boat === BACKUP_BOAT_INDEX ? 1 : conditionHandling(save.boatCondition[save.boat] ?? 100);
+  const traits = boatTraits(boat());
   const handling = { ...boat(), coast: !run.engineOn && nearListeningBoat ? .16 : boat().coast,
-    turnRate: boat().turnRate * (1 - presentOffshore.swell * .42), acceleration: boat().acceleration * (1 - presentOffshore.swell * .28) };
+    turnRate: boat().turnRate * conditionFactor * (1 - presentOffshore.swell * .42), acceleration: boat().acceleration * conditionFactor * (1 - presentOffshore.swell * .28) };
   const motion = advanceMotion(run, target, { x: dx, z: dz }, maxSpeed, dt, handling);
   const offshore = offshoreState(currentPlan, motion.x, motion.z);
   const buffeting = roughWaterPush(currentPlan, motion.x, motion.z, run.elapsed);
-  const lateral = currentPush(currentPlan, motion.x, motion.z, run.elapsed) + weatherPush(currentPlan, run.elapsed) + offshore.push + buffeting.x;
+  const lateral = currentPush(currentPlan, motion.x, motion.z, run.elapsed) * traits.current + weatherPush(currentPlan, run.elapsed) * traits.wind + offshore.push + buffeting.x;
   run.vx = (motion.vx + lateral * dt) * (1 - offshore.drag * dt); run.vz = motion.vz * (1 - offshore.drag * dt);
   run.vz += buffeting.z * dt;
   run.z = Math.max(-2, Math.min(currentPlan.routeEnd, motion.z + buffeting.z * dt * dt * .5));
@@ -551,8 +567,8 @@ function updateRun(dt: number): void {
   for (const patrol of world.patrols) {
     const distance = Math.hypot(run.x - patrol.x, run.z - patrol.z);
     if (patrol.sound) {
-      if (heardBySoundPatrol(distance, run.engineOn, run.speed)) heard = true;
-    } else if (inVisionCone(patrol, run.x, run.z, (11.5 + run.patrolHeat * .12 + (run.hotCargo ? 2 : 0)) * sight.rangeMultiplier, sight.halfAngle)) spotted = true;
+      if (traits.sonarAudible && heardBySoundPatrol(distance, run.engineOn, run.speed)) heard = true;
+    } else if (inVisionCone(patrol, run.x, run.z, (11.5 + run.patrolHeat * .12 + (run.hotCargo ? 2 : 0)) * sight.rangeMultiplier * traits.vision, sight.halfAngle)) spotted = true;
     if (distance < (patrol.sound ? 2.75 : 2.65)) contact = true;
   }
   run.contact = contact ? run.contact + dt : Math.max(0, run.contact - dt * 1.5);
@@ -567,7 +583,8 @@ function updateRun(dt: number): void {
   if (run.contact >= 1.5 || run.soundExposure >= 1.8 || run.heat >= 100) { run.ending = true; showImpact('CAUGHT!'); window.setTimeout(() => endRun(false, 'caught'), 650); return; }
   for (const hazard of world.hazards) {
     if (Math.hypot(run.x - hazard.x, run.z - hazard.z) < hazard.radius + .85 && run.damageCooldown === 0) {
-      const damage = hazard.kind === 'rock' ? 24 : hazard.kind === 'iceberg' ? 27 : hazard.kind === 'sandbank' || hazard.kind === 'reef' ? 17 : hazard.kind === 'driftwood' ? 13 : 12;
+      const rawDamage = hazard.kind === 'rock' ? 24 : hazard.kind === 'iceberg' ? 27 : hazard.kind === 'sandbank' || hazard.kind === 'reef' ? 17 : hazard.kind === 'driftwood' ? 13 : 12;
+      const damage = impactDamage(boat(), hazard.kind, rawDamage);
       run.hull = Math.max(0, run.hull - damage); run.collisions++; run.damageCooldown = 1.25;
       const awayX = run.x - hazard.x, awayZ = run.z - hazard.z;
       const awayLength = Math.hypot(awayX, awayZ) || 1;
@@ -623,7 +640,7 @@ function handleAction(action: string, id?: string, target?: HTMLElement): void {
   }
   else if (action === 'repair-bay' || action === 'broker-desk') {
     const key = action === 'repair-bay' ? 'repairBay' : 'brokerDesk';
-    const level = save.yardUpgrades[key]; const cost = (key === 'repairBay' ? 160 : 220) + level * (key === 'repairBay' ? 190 : 260);
+    const level = save.yardUpgrades[key]; const cost = yardPrices[key][level];
     if (level >= 3 || save.cash < cost) return;
     save.cash -= cost; save.yardUpgrades[key]++; saveProgress(); tick(); render(); notify(`${key === 'repairBay' ? 'Repair workshop' : "Broker's desk"} upgraded.`, 'success');
   }
@@ -633,11 +650,9 @@ function handleAction(action: string, id?: string, target?: HTMLElement): void {
     save.cash -= craft.price; save.ownedBoats.push(index); save.ownedBoats.sort((a, b) => a - b);
     save.boatUpgrades[index] = { engine: 0, hull: 0 }; save.boatCondition[index] = 100;
     save.boat = index;
-    const previouslyOpen = save.unlockedPorts.length;
     refreshHarborUnlocks(save);
-    if (index === 1 && save.unlockedPorts.includes(1)) save.port = 1;
     jobs = []; pieces = []; selected = null; world.setBoat(craft); saveProgress(); tick(); render();
-    notify(`${craft.name} is yours${save.unlockedPorts.length > previouslyOpen ? ` · ${PORTS[save.unlockedPorts.at(-1)!]} unlocked` : ''}!`, 'success');
+    notify(`${craft.name} is yours! Its ${craft.ability.toLowerCase()} ability is ready.`, 'success');
   }
   else if (action === 'switch-boat' && id) {
     const index = Number(id); if (!save.ownedBoats.includes(index) || index === save.boat || (index !== BACKUP_BOAT_INDEX && (save.boatCondition[index] ?? 100) < MIN_SEAWORTHY_CONDITION)) return;
@@ -647,6 +662,12 @@ function handleAction(action: string, id?: string, target?: HTMLElement): void {
     const index = Number(id); if (!save.unlockedPorts.includes(index) || index === save.port) return;
     save.port = index; jobs = []; pieces = []; selected = null; phase = 'board';
     saveProgress(); tick(); render(); notify(`Now sailing from ${PORTS[index]}.`, 'success');
+  }
+  else if (action === 'open-port' && id) {
+    const index = Number(id);
+    if (!openHarbor(save, index)) return;
+    save.port = index; jobs = []; pieces = []; selected = null; phase = 'board';
+    saveProgress(); tick(); render(); notify(`${PORTS[index]} charted and ready to sail!`, 'success');
   }
 
 }

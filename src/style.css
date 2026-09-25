@@ -406,6 +406,12 @@ button:active:not(:disabled) { transform: translateY(2px); }
 .market-stats strong { font: 900 11px ui-monospace, monospace; }
 .market-stats small { color: #6f8881; font: 800 9px ui-monospace, monospace; }
 .market-body .primary-button, .market-body .secondary-button { min-height: 37px; padding: 8px 11px; font-size: 12px; }
+.boat-ability, .ability-ribbon { display: flex; flex-direction: column; gap: 3px; padding: 9px 11px; border: 1px solid #bad8c6; border-radius: 10px; background: #e9f6df; color: #235b56; font-size: 11px; line-height: 1.35; }
+.boat-ability { margin: 10px 0; }
+.boat-ability strong, .ability-ribbon strong { font-size: 11px; color: #236f61; }
+.ability-ribbon { margin: 10px 0 12px; }
+.charter-progress { display: flex; flex-wrap: wrap; gap: 4px 9px; align-items: center; margin: 9px 0; padding: 8px 10px; border-radius: 9px; background: #e9f6df; color: #245d55; font-size: 10px; }
+.charter-progress strong { font-family: ui-monospace, monospace; }
 .map-chart { position: relative; min-height: 425px; padding: 14px; overflow: hidden; border: 3px solid #407786; border-radius: 20px; background: radial-gradient(ellipse at 25% 36%, #a7d4bb 0 5%, transparent 5.4%), radial-gradient(ellipse at 72% 66%, #afd4b2 0 5%, transparent 5.4%), linear-gradient(145deg, #8acacb, #65b4bc); box-shadow: inset 0 0 0 5px rgba(230, 248, 213, .24); }
 .map-chart::before { content: '✧   ✦       ✧          ✦'; position: absolute; inset: 9px; color: rgba(255,255,229,.42); font-size: 32px; letter-spacing: 2.5em; pointer-events: none; }
 .map-route { position: absolute; inset: 8px; width: calc(100% - 16px); height: calc(100% - 16px); pointer-events: none; }

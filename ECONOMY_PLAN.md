@@ -1,6 +1,6 @@
 # Crate Escape economy and monetisation proposal
 
-**Status:** planning only. None of the prices, unlock rules, currencies, ads, or purchases below are implemented. Figures are starting hypotheses for play testing, not final store prices.
+**Status:** The core game-cash balance is implemented: boat prices and specialties, local harbour charters, outfitting fees, bounded cargo pay, service and repairs, and reduced rare-offer frequency. The payout and timing figures remain hypotheses for play testing. Paid products, token currency, ads, daily challenges, cosmetics and purchase infrastructure remain proposals below; they are not in the game.
 
 ## What the current build does
 

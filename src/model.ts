@@ -10,7 +10,10 @@ export interface BoatDefinition {
   name: string; style: BoatStyle; width: number; height: number; blocked: Cell[];
   speed: number; turnRate: number; acceleration: number; coast: number; hull: number;
   price: number; repairRate: number; color: string; description: string; handling: string;
+  ability: string; abilityDetail: string;
 }
+export interface HarborRecord { deliveries: number; cargoKinds: CargoKind[]; clean: boolean }
+export interface HarborGate { runs: number; capacity: number; fee: number }
 export interface BoatUpgrades { engine: number; hull: number }
 export interface YardUpgrades { repairBay: number; brokerDesk: number }
 
@@ -52,50 +55,84 @@ export interface SaveData {
   level: number;
   soundTutorialSeen: boolean;
   sound: boolean;
+  harborRecords: Record<number, HarborRecord>;
+  offerCycle: number;
 }
 
 export const BOATS: BoatDefinition[] = [
-  { name: 'Little Dinghy', style: 'dinghy', width: 4, height: 3, blocked: [], speed: 1, turnRate: 3.8, acceleration: 2.7, coast: 1.25, hull: 100, price: 0, repairRate: 1, color: '#ff8557', handling: 'Nimble', description: 'Tiny turns and a snug, square hold.' },
-  { name: 'Skipjack Speedboat', style: 'speedboat', width: 5, height: 4, blocked: [[0, 0], [4, 0]], speed: 1.25, turnRate: 2.9, acceleration: 3.1, coast: 1.15, hull: 95, price: 250, repairRate: 1.2, color: '#ffe166', handling: 'Quick', description: 'Fast, pointed, and roomy behind the bow.' },
-  { name: 'Merry Trawler', style: 'trawler', width: 6, height: 4, blocked: [[0, 0], [5, 0]], speed: 0.91, turnRate: 2.0, acceleration: 1.8, coast: 0.85, hull: 145, price: 720, repairRate: 1.45, color: '#75c7a6', handling: 'Steady', description: 'A broad workboat that shrugs off bumps.' },
-  { name: 'Sunbeam Cruiser', style: 'cruiser', width: 7, height: 5, blocked: [[0, 0], [6, 0], [0, 4], [6, 4]], speed: 1.08, turnRate: 1.5, acceleration: 1.35, coast: 0.7, hull: 180, price: 1650, repairRate: 1.8, color: '#f49aa0', handling: 'Wide turns', description: 'Long decks, a pinched bow, and plenty of cargo room.' },
-  { name: 'Cloudbreak Freighter', style: 'freighter', width: 8, height: 6, blocked: [[0, 0], [7, 0], [3, 5], [4, 5]], speed: 0.82, turnRate: 0.9, acceleration: 0.9, coast: 0.48, hull: 250, price: 3400, repairRate: 2.2, color: '#a79cda', handling: 'Heavy turns', description: 'A floating warehouse with a slow, deliberate helm.' },
-  { name: 'Pip Skiff', style: 'skiff', width: 5, height: 3, blocked: [[0, 0], [4, 0]], speed: 1.42, turnRate: 4.1, acceleration: 3.6, coast: 1.4, hull: 75, price: 390, repairRate: 1.25, color: '#7ccbe1', handling: 'Razor turns', description: 'A darting little courier with exposed deck space.' },
-  { name: 'Twinfin Catamaran', style: 'catamaran', width: 6, height: 5, blocked: [[0, 0], [5, 0], [2, 4], [3, 4]], speed: 1.18, turnRate: 2.25, acceleration: 2.15, coast: 0.92, hull: 125, price: 1080, repairRate: 1.55, color: '#87ddd1', handling: 'Balanced', description: 'Two slim hulls and a broad, split cargo deck.' },
-  { name: 'Hearthside Houseboat', style: 'houseboat', width: 7, height: 5, blocked: [[0, 0], [6, 0], [0, 4], [6, 4]], speed: 0.76, turnRate: 1.12, acceleration: 1.05, coast: 0.56, hull: 205, price: 1980, repairRate: 1.7, color: '#f1b779', handling: 'Gentle turns', description: 'A floating cottage with a generous square hold.' },
-  { name: 'Bluebell Clipper', style: 'clipper', width: 8, height: 5, blocked: [[0, 0], [7, 0], [0, 4], [7, 4]], speed: 1.3, turnRate: 1.3, acceleration: 1.45, coast: 0.65, hull: 160, price: 2850, repairRate: 2.05, color: '#7cafe0', handling: 'Sweeping turns', description: 'A long, swift hull that needs room to carve.' },
-  { name: 'Mossbank Barge', style: 'barge', width: 9, height: 6, blocked: [[0, 0], [8, 0], [0, 5], [8, 5]], speed: 0.68, turnRate: 0.68, acceleration: 0.75, coast: 0.36, hull: 310, price: 4950, repairRate: 2.45, color: '#a5bb7a', handling: 'Very wide turns', description: 'The biggest hold afloat, with a patient helm.' },
-  { name: 'Patchwork Sailboat', style: 'sailboat', width: 4, height: 3, blocked: [[0, 0], [3, 0], [0, 2], [3, 2]], speed: 0.58, turnRate: 2.5, acceleration: 0.8, coast: 0.42, hull: 65, price: 0, repairRate: 0, color: '#75bbcf', handling: 'Slow but free', description: 'Your free lifeline when repairs are out of reach. A tiny hold and a gentle sail.' },
+  { name: 'Little Dinghy', style: 'dinghy', width: 4, height: 3, blocked: [], speed: 1, turnRate: 3.8, acceleration: 2.7, coast: 1.25, hull: 100, price: 0, repairRate: 2.8, color: '#ff8557', handling: 'Nimble', description: 'Tiny turns and a snug, square hold.', ability: 'Tight squeeze', abilityDetail: '25% less damage from sandbanks and reefs.' },
+  { name: 'Skipjack Speedboat', style: 'speedboat', width: 5, height: 4, blocked: [[0, 0], [4, 0]], speed: 1.25, turnRate: 2.9, acceleration: 3.1, coast: 1.15, hull: 95, price: 750, repairRate: 3.4, color: '#ffe166', handling: 'Quick', description: 'Fast, pointed, and roomy behind the bow.', ability: 'Express run', abilityDetail: 'Perishable cargo gets 25% more delivery time.' },
+  { name: 'Merry Trawler', style: 'trawler', width: 6, height: 4, blocked: [[0, 0], [5, 0]], speed: 0.91, turnRate: 2.0, acceleration: 1.8, coast: 0.85, hull: 145, price: 2200, repairRate: 4.2, color: '#75c7a6', handling: 'Steady', description: 'A broad workboat that shrugs off bumps.', ability: 'Working hull', abilityDetail: '20% less collision damage.' },
+  { name: 'Sunbeam Cruiser', style: 'cruiser', width: 7, height: 5, blocked: [[0, 0], [6, 0], [0, 4], [6, 4]], speed: 1.08, turnRate: 1.5, acceleration: 1.35, coast: 0.7, hull: 180, price: 6800, repairRate: 5.4, color: '#f49aa0', handling: 'Wide turns', description: 'Long decks, a pinched bow, and plenty of cargo room.', ability: 'Gentle stowage', abilityDetail: 'Fragile cargo loses only half as much pay to collisions.' },
+  { name: 'Cloudbreak Freighter', style: 'freighter', width: 8, height: 6, blocked: [[0, 0], [7, 0], [3, 5], [4, 5]], speed: 0.82, turnRate: 0.9, acceleration: 0.9, coast: 0.48, hull: 250, price: 14500, repairRate: 7, color: '#a79cda', handling: 'Heavy turns', description: 'A floating warehouse with a slow, deliberate helm.', ability: 'Bulk contract', abilityDetail: '8% extra cargo pay when at least 30 cells are packed.' },
+  { name: 'Pip Skiff', style: 'skiff', width: 5, height: 3, blocked: [[0, 0], [4, 0]], speed: 1.42, turnRate: 4.1, acceleration: 3.6, coast: 1.4, hull: 75, price: 950, repairRate: 3.2, color: '#7ccbe1', handling: 'Razor turns', description: 'A darting little courier with exposed deck space.', ability: 'Low profile', abilityDetail: 'Patrol searchlights have 15% less range.' },
+  { name: 'Twinfin Catamaran', style: 'catamaran', width: 6, height: 5, blocked: [[0, 0], [5, 0], [2, 4], [3, 4]], speed: 1.18, turnRate: 2.25, acceleration: 2.15, coast: 0.92, hull: 125, price: 4200, repairRate: 4.7, color: '#87ddd1', handling: 'Balanced', description: 'Two slim hulls and a broad, split cargo deck.', ability: 'Twin keel', abilityDetail: '40% less push from strong currents.' },
+  { name: 'Hearthside Houseboat', style: 'houseboat', width: 7, height: 5, blocked: [[0, 0], [6, 0], [0, 4], [6, 4]], speed: 0.76, turnRate: 1.12, acceleration: 1.05, coast: 0.56, hull: 205, price: 8200, repairRate: 4.8, color: '#f1b779', handling: 'Gentle turns', description: 'A floating cottage with a generous square hold.', ability: 'Home workshop', abilityDetail: '25% lower repair costs for this boat.' },
+  { name: 'Bluebell Clipper', style: 'clipper', width: 8, height: 5, blocked: [[0, 0], [7, 0], [0, 4], [7, 4]], speed: 1.3, turnRate: 1.3, acceleration: 1.45, coast: 0.65, hull: 160, price: 10500, repairRate: 5.8, color: '#7cafe0', handling: 'Sweeping turns', description: 'A long, swift hull that needs room to carve.', ability: 'Weather vane', abilityDetail: '50% less sideways push from wind and storms.' },
+  { name: 'Mossbank Barge', style: 'barge', width: 9, height: 6, blocked: [[0, 0], [8, 0], [0, 5], [8, 5]], speed: 0.68, turnRate: 0.68, acceleration: 0.75, coast: 0.36, hull: 310, price: 28000, repairRate: 8.4, color: '#a5bb7a', handling: 'Very wide turns', description: 'The biggest hold afloat, with a patient helm.', ability: 'Deep hold', abilityDetail: '12% extra cargo pay when at least 40 cells are packed.' },
+  { name: 'Patchwork Sailboat', style: 'sailboat', width: 4, height: 3, blocked: [[0, 0], [3, 0], [0, 2], [3, 2]], speed: 0.58, turnRate: 2.5, acceleration: 0.8, coast: 0.42, hull: 65, price: 0, repairRate: 0, color: '#75bbcf', handling: 'Slow but free', description: 'Your free lifeline when repairs are out of reach. A tiny hold and a gentle sail.', ability: 'Silent sail', abilityDetail: 'Acoustic patrols cannot hear its engine.' },
 ];
 export const BACKUP_BOAT_INDEX = BOATS.length - 1;
 export const MIN_SEAWORTHY_CONDITION = 45;
+export const HARBOR_GATES: HarborGate[] = [
+  [0,0,0],[4,18,0],[5,18,250],[6,22,500],[7,22,750],
+  [5,22,1000],[5,22,1250],[6,26,1500],[6,26,1750],[6,26,2000],
+  [7,31,2250],[7,31,2500],[7,31,2750],[7,31,3000],[8,36,3250],
+  [8,36,3500],[8,36,3750],[8,36,4000],[8,44,4250],[9,44,4500],
+  [9,44,4750],[9,44,5000],[9,50,5250],[10,50,5500],[10,50,5750],
+].map(([runs, capacity, fee]) => ({ runs, capacity, fee }));
 
 export const usableCells = (boat: BoatDefinition): number => boat.width * boat.height - boat.blocked.length;
+export function boatTraits(boat: BoatDefinition): { deadline: number; current: number; wind: number; vision: number; sonarAudible: boolean } {
+  return { deadline: boat.style === 'speedboat' ? 1.25 : 1, current: boat.style === 'catamaran' ? .6 : 1,
+    wind: boat.style === 'clipper' ? .5 : 1, vision: boat.style === 'skiff' ? .85 : 1, sonarAudible: boat.style !== 'sailboat' };
+}
+export function impactDamage(boat: BoatDefinition, kind: string, raw: number): number {
+  return Math.round(raw * (boat.style === 'trawler' ? .8 : boat.style === 'dinghy' && (kind === 'sandbank' || kind === 'reef') ? .75 : 1));
+}
+export function conditionHandling(condition: number): number { return Math.max(.78, 1 - Math.max(0, 70 - condition) * .004); }
 export const isBlocked = (x: number, y: number, blocked: readonly Cell[]): boolean => blocked.some(([bx, by]) => bx === x && by === y);
 export const boatUpgrade = (save: SaveData, index = save.boat): BoatUpgrades => save.boatUpgrades[index] || { engine: 0, hull: 0 };
 export const repairCost = (save: SaveData, index = save.boat): number => Math.ceil(
-  (100 - (save.boatCondition[index] ?? 100)) * BOATS[index].repairRate * (1 - save.yardUpgrades.repairBay * 0.18),
+  (100 - (save.boatCondition[index] ?? 100)) * BOATS[index].repairRate * (index === 7 ? .75 : 1) * (1 - save.yardUpgrades.repairBay * 0.18),
 );
-export const rareChance = (save: SaveData): number => 0.14 + save.yardUpgrades.brokerDesk * 0.16;
+export const rareChance = (save: SaveData): number => 0.04 + save.yardUpgrades.brokerDesk * (1 / 30);
 
 export const PORTS = HARBORS.map(harbor => harbor.name);
 export function harborRequirements(save: SaveData, index: number): string[] {
   const harbor = HARBORS[index];
   if (!harbor) return ['Unknown harbor'];
+  if (save.unlockedPorts.includes(index)) return [];
+  const gate = HARBOR_GATES[index];
   const unmet: string[] = [];
   if (index > 0 && !save.unlockedPorts.includes(index - 1)) unmet.push(`Unlock ${HARBORS[index - 1].name} first`);
-  if (harbor.requiredBoat !== null && !save.ownedBoats.includes(harbor.requiredBoat)) unmet.push(`Own the ${BOATS[harbor.requiredBoat].name}`);
-  if (save.reputation < harbor.reputation) unmet.push(`${harbor.reputation} reputation (${Math.floor(save.reputation)}/${harbor.reputation})`);
-  if (Math.max(...save.ownedBoats.map(id => usableCells(BOATS[id]))) < harbor.capacity) unmet.push(`Own a boat with ${harbor.capacity}+ cargo cells`);
+  if (index > 0) {
+    const record = save.harborRecords?.[index - 1];
+    if ((record?.deliveries ?? 0) < gate.runs) unmet.push(`Deliveries ${record?.deliveries ?? 0}/${gate.runs}`);
+    if ((record?.cargoKinds.length ?? 0) < 2) unmet.push(`Cargo types ${record?.cargoKinds.length ?? 0}/2`);
+    if (!record?.clean) unmet.push('Clean delivery needed');
+  }
+  if (Math.max(...save.ownedBoats.map(id => usableCells(BOATS[id]))) < gate.capacity) unmet.push(`${gate.capacity}-cell boat needed`);
+  if (save.cash < gate.fee) unmet.push(`Outfitting ${moneyGate(save.cash)}/${moneyGate(gate.fee)}`);
   return unmet;
 }
+const moneyGate = (value: number): string => `$${Math.floor(value).toLocaleString()}`;
+export function openHarbor(save: SaveData, index: number): boolean {
+  if (index <= 0 || harborRequirements(save, index).length) return false;
+  save.cash -= HARBOR_GATES[index].fee;
+  save.unlockedPorts.push(index);
+  save.unlockedPorts.sort((a, b) => a - b);
+  return true;
+}
+export function recordHarborDelivery(save: SaveData, port: number, jobs: Job[], clean: boolean): void {
+  const record = save.harborRecords[port] ?? { deliveries: 0, cargoKinds: [], clean: false };
+  record.deliveries++;
+  for (const job of jobs) if (!record.cargoKinds.includes(job.kind)) record.cargoKinds.push(job.kind);
+  record.clean ||= clean;
+  save.harborRecords[port] = record;
+}
 export function refreshHarborUnlocks(save: SaveData): number[] {
-  const unlocked = new Set(save.unlockedPorts);
-  HARBORS.forEach((_, index) => {
-    save.unlockedPorts = [...unlocked].sort((a, b) => a - b);
-    if (harborRequirements(save, index).length === 0) unlocked.add(index);
-  });
-  save.unlockedPorts = [...unlocked].sort((a, b) => a - b);
+  save.unlockedPorts = [...new Set([0, ...save.unlockedPorts])].filter(index => index >= 0 && index < HARBORS.length).sort((a, b) => a - b);
   return save.unlockedPorts;
 }
 
@@ -158,7 +195,7 @@ const generatedJobs: Job[][] = HARBORS.slice(5).map((harbor, offset) => {
   const notes = ['A local commission with a long journey.', 'Awkward shapes need a careful hold.', 'Handle gently; a rough voyage lowers the pay.', 'Fresh cargo needs a quick arrival.', 'Patrols are already curious about these crates.'];
   return harbor.cargo.map((cargo, index) => ({
     id: `harbor-${port}-${index}`, client: `${harbor.name} ${clients[index]}`, cargo,
-    kind: kinds[index], shapes: shapes[index], payout: 210 + port * 58 + index * 47,
+    kind: kinds[index], shapes: port >= 18 && index > 0 ? [...shapes[index], index % 2 ? 'domino' : 'ell'] : shapes[index], payout: 210 + port * 58 + index * 47,
     heat: Math.min(5, 1 + index), destination: `${harbor.name} ${index % 2 ? 'Jetty' : 'Pier'}`,
     note: notes[index], color: [harbor.color, '#f3c27c', '#a9cbe0', '#b7d4b5', '#d4a5b9'][index],
     icon: ['✿', '▣', '◈', '◒', '?'][index],
@@ -187,12 +224,35 @@ for (let port = 5; port < HARBORS.length; port++) {
 
 /** One stable offer per completed run. A better broker increases the offer frequency. */
 export function specialOfferFor(save: SaveData): Job | null {
-  const seed = ((save.runs + 1) * 1664525 + save.port * 1013904223) >>> 0;
+  const seed = ((save.offerCycle + 1) * 1664525 + save.port * 1013904223) >>> 0;
   const roll = ((seed ^ (seed >>> 16)) % 1000) / 1000;
   return roll < rareChance(save) ? specialJobs[save.port][seed % specialJobs[save.port].length] : null;
 }
 export function jobsForPort(port: number, special: Job | null = null): Job[] { return [...(portJobs[port] || coveJobs), ...(special ? [special] : [])]; }
 export function jobById(id: string): Job | undefined { return [...portJobs.flat(), ...specialJobs.flat()].find(job => job.id === id); }
+export function cargoCells(jobs: Job[]): number { return jobs.reduce((sum, job) => sum + job.shapes.reduce((cells, shape) => cells + SHAPES[shape].length, 0), 0); }
+export function estimateCargoPay(port: number, jobs: Job[], craft: BoatDefinition): number {
+  if (!jobs.length) return 0;
+  const loaded = Math.min(usableCells(craft), cargoCells(jobs));
+  const target = Math.max(12, Math.min(40, HARBOR_GATES[port]?.capacity || 12));
+  const fill = Math.min(1, loaded / target);
+  const heat = jobs.reduce((sum, job) => sum + job.heat, 0) / jobs.length;
+  const rare = jobs.some(job => job.rare) ? 1.3 : 1;
+  const bulk = craft.style === 'freighter' && loaded >= 30 ? 1.08 : craft.style === 'barge' && loaded >= 40 ? 1.12 : 1;
+  return Math.round((150 + port * 58) * (.18 + .9 * fill) * (1 + (heat - 1) * .025) * rare * bulk);
+}
+export interface VoyageReceipt { base: number; bonus: number; adjustment: number; service: number; payout: number }
+export function voyageReceipt(port: number, jobs: Job[], craft: BoatDefinition, fullHold: boolean, collisions: number, late: boolean): VoyageReceipt {
+  const base = estimateCargoPay(port, jobs, craft);
+  const bonus = fullHold ? Math.round(base * .1) : 0;
+  let gross = base + bonus;
+  if (jobs.some(job => job.kind === 'fragile')) gross -= Math.round(base * Math.min(collisions * (craft.style === 'cruiser' ? .1 : .2), .8));
+  if (late && jobs.some(job => job.kind === 'perishable')) gross = Math.round(gross * .7);
+  gross = Math.max(0, gross);
+  const adjustment = base + bonus - gross;
+  const service = Math.round(gross * .1);
+  return { base, bonus, adjustment, service, payout: gross - service };
+}
 
 export function rotatedCells(shape: Shape, rotation: number): Cell[] {
   let cells: Cell[] = SHAPES[shape].map(([x, y]) => [x, y]);
@@ -258,7 +318,7 @@ export function canFitAll(pieces: Piece[], width: number, height: number, blocke
 }
 
 export function defaultSave(): SaveData {
-  return { cash: 80, reputation: 0, boat: 0, ownedBoats: [0, BACKUP_BOAT_INDEX], port: 0, unlockedPorts: [0], boatUpgrades: { 0: { engine: 0, hull: 0 }, [BACKUP_BOAT_INDEX]: { engine: 0, hull: 0 } }, boatCondition: { 0: 100, [BACKUP_BOAT_INDEX]: 100 }, yardUpgrades: { repairBay: 0, brokerDesk: 0 }, runs: 0, level: 1, soundTutorialSeen: false, sound: true };
+  return { cash: 80, reputation: 0, boat: 0, ownedBoats: [0, BACKUP_BOAT_INDEX], port: 0, unlockedPorts: [0], boatUpgrades: { 0: { engine: 0, hull: 0 }, [BACKUP_BOAT_INDEX]: { engine: 0, hull: 0 } }, boatCondition: { 0: 100, [BACKUP_BOAT_INDEX]: 100 }, yardUpgrades: { repairBay: 0, brokerDesk: 0 }, runs: 0, level: 1, soundTutorialSeen: false, sound: true, harborRecords: {}, offerCycle: 0 };
 }
 
 export function loadSave(): SaveData {
@@ -275,12 +335,20 @@ export function loadSave(): SaveData {
       boatUpgrades[index] = { engine: Math.max(0, Math.min(3, Number(previous?.engine) || 0)), hull: Math.max(0, Math.min(3, Number(previous?.hull) || 0)) };
       boatCondition[index] = index === BACKUP_BOAT_INDEX ? 100 : Math.max(30, Math.min(100, Number(data.boatCondition?.[index]) || 100));
     }
+    const harborRecords: SaveData['harborRecords'] = {};
+    for (const [key, value] of Object.entries(data.harborRecords || {})) {
+      const index = Number(key), record = value as HarborRecord;
+      if (Number.isInteger(index) && index >= 0 && index < HARBORS.length && record && typeof record === 'object') {
+        harborRecords[index] = { deliveries: Math.max(0, Math.floor(Number(record.deliveries) || 0)), cargoKinds: Array.isArray(record.cargoKinds) ? record.cargoKinds.filter(kind => ['standard', 'bulky', 'hot', 'perishable', 'fragile', 'vip'].includes(kind)) : [], clean: record.clean === true };
+      }
+    }
     const restored: SaveData = { cash: Math.max(0, data.cash), reputation: Number(data.reputation) || 0, boat: owned.includes(selected) ? selected : 0,
       ownedBoats: owned, port: Number.isInteger(data.port) && data.port! >= 0 && data.port! < HARBORS.length ? data.port! : 0,
       unlockedPorts: [...new Set([0, ...(Array.isArray(data.unlockedPorts) ? data.unlockedPorts : data.port === 1 ? [1] : [])])].filter(index => Number.isInteger(index) && index >= 0 && index < HARBORS.length), boatUpgrades, boatCondition,
       yardUpgrades: { repairBay: Math.max(0, Math.min(3, Number(data.yardUpgrades?.repairBay) || 0)), brokerDesk: Math.max(0, Math.min(3, Number(data.yardUpgrades?.brokerDesk) || 0)) },
       runs: Math.max(0, Number(data.runs) || 0), level: Math.max(1, Math.floor(Number(data.level) || (Math.max(0, Number(data.runs) || 0) + 1))),
-      soundTutorialSeen: data.soundTutorialSeen === true, sound: typeof data.sound === 'boolean' ? data.sound : initial.sound };
+      soundTutorialSeen: data.soundTutorialSeen === true, sound: typeof data.sound === 'boolean' ? data.sound : initial.sound,
+      harborRecords, offerCycle: Math.max(0, Math.floor(Number(data.offerCycle) || Number(data.runs) || 0)) };
     if (restored.boat !== BACKUP_BOAT_INDEX && restored.boatCondition[restored.boat] < MIN_SEAWORTHY_CONDITION && restored.cash < repairCost(restored)) restored.boat = BACKUP_BOAT_INDEX;
     refreshHarborUnlocks(restored);
     if (!restored.unlockedPorts.includes(restored.port)) restored.port = 0;

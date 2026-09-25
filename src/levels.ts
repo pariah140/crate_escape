@@ -8,7 +8,7 @@ export interface PatrolSlot { x: number; z: number; sound: boolean }
 export interface LevelPlan {
   number: number; port: number; routeEnd: number; channelWidth: number; hazards: RouteHazard[];
   currents: CurrentZone[]; patrols: PatrolSlot[]; weather: Weather; night: boolean;
-  wind: number; payoutMultiplier: number;
+  wind: number;
 }
 const hash = (seed: number): number => {
   const value = Math.sin(seed * 91.417 + 17.3) * 43758.5453;
@@ -73,7 +73,6 @@ export function levelPlan(number: number, port: number): LevelPlan {
   const night = level >= 61 && ((level + harborIndex) % 3 !== 0 || harborIndex >= 20);
   const plan: LevelPlan = { number: level, port: harborIndex, routeEnd, channelWidth, hazards: [], currents: [], patrols: [], weather, night,
     wind: weather === 'wind' ? 1.3 + tier * 1.7 : weather === 'storm' ? 2.8 + tier * 1.8 : weather === 'snow' ? .8 + tier : weather === 'rain' ? .55 : 0,
-    payoutMultiplier: 1 + Math.log2(level) * .085 + harborIndex * .018,
   };
   for (let i = 0; i < rockCount; i++) {
     const seed = harborIndex * 613 + i * 17 + (i >= 4 ? level * 37 : 0);

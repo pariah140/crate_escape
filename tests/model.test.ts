@@ -50,12 +50,13 @@ test('yard facilities change real repair prices and rare offer frequency', async
   base.yardUpgrades.repairBay = 2;
   assert.ok(repairCost(base) < originalRepair);
   const ordinaryChance = rareChance(base);
-  const firstOffers = Array.from({ length: 100 }, (_, runs) => specialOfferFor({ ...base, runs })?.id);
+  const firstOffers = Array.from({ length: 1000 }, (_, offerCycle) => specialOfferFor({ ...base, offerCycle })?.id);
   base.yardUpgrades.brokerDesk = 3;
   assert.ok(rareChance(base) > ordinaryChance);
-  const betterOffers = Array.from({ length: 100 }, (_, runs) => specialOfferFor({ ...base, runs })?.id);
+  const betterOffers = Array.from({ length: 1000 }, (_, offerCycle) => specialOfferFor({ ...base, offerCycle })?.id);
   assert.ok(betterOffers.filter(Boolean).length > firstOffers.filter(Boolean).length);
-  assert.equal(specialOfferFor({ ...base, runs: 7 })?.id, specialOfferFor({ ...base, runs: 7 })?.id);
+  assert.equal(specialOfferFor({ ...base, offerCycle: 7 })?.id, specialOfferFor({ ...base, offerCycle: 7 })?.id);
+  assert.equal(specialOfferFor({ ...base, runs: 800 })?.id, specialOfferFor(base)?.id, 'failed runs cannot reroll the board');
 });
 
 test('previous saves keep the owned speedboat and upgrades', async () => {
@@ -102,23 +103,24 @@ test('saved voyage numbers are no longer capped at one hundred', async () => {
 });
 
 
-test('harbor map unlocks follow boat and reputation requirements and stay open', async () => {
-  const { defaultSave, HARBORS, harborRequirements, refreshHarborUnlocks } = await import('../src/model');
+test('harbor charters need local deliveries, variety, a clean run, capacity and outfitting', async () => {
+  const { defaultSave, HARBORS, harborRequirements, openHarbor, recordHarborDelivery } = await import('../src/model');
   const save = defaultSave();
   assert.equal(HARBORS.length, 25);
   assert.deepEqual(save.unlockedPorts, [0]);
-  assert.match(harborRequirements(save, 1).join(' '), /Skipjack/);
+  assert.match(harborRequirements(save, 1).join(' '), /Deliveries 0\/4/);
+  const jobs = jobsForPort(0);
+  for (let i = 0; i < 4; i++) recordHarborDelivery(save, 0, [jobs[i % 2]], i === 2);
   save.ownedBoats.push(1);
-  refreshHarborUnlocks(save);
+  assert.equal(openHarbor(save, 1), true);
   assert.deepEqual(save.unlockedPorts, [0, 1]);
-  save.reputation = 25;
-  assert.match(harborRequirements(save, 2).join(' '), /22\+ cargo cells/);
-  save.ownedBoats.push(2);
-  refreshHarborUnlocks(save);
-  assert.ok(save.unlockedPorts.includes(2));
-  save.reputation = 0;
-  refreshHarborUnlocks(save);
-  assert.ok(save.unlockedPorts.includes(2));
+  for (let i = 0; i < 5; i++) recordHarborDelivery(save, 1, [jobsForPort(1)[i % 2]], i === 0);
+  assert.match(harborRequirements(save, 2).join(' '), /Outfitting/);
+  save.cash = 260;
+  assert.equal(openHarbor(save, 2), true);
+  assert.equal(save.cash, 10);
+  save.cash = 0;
+  assert.ok(save.unlockedPorts.includes(2), 'opened harbours stay open');
 });
 
 test('every harbor has distinct jobs and all can fit a large hull', async () => {
@@ -137,12 +139,36 @@ test('every harbor has distinct jobs and all can fit a large hull', async () => 
 
 
 test('later harbors cannot skip the previous stop', async () => {
-  const { defaultSave, harborRequirements, refreshHarborUnlocks } = await import('../src/model');
+  const { defaultSave, harborRequirements, openHarbor, recordHarborDelivery } = await import('../src/model');
   const save = defaultSave(); save.reputation = 200; save.ownedBoats.push(4);
-  refreshHarborUnlocks(save);
   assert.deepEqual(save.unlockedPorts, [0]);
   assert.match(harborRequirements(save, 2).join(' '), /Fogbank Harbour first/);
   save.ownedBoats.push(1);
-  refreshHarborUnlocks(save);
-  assert.ok([0, 1, 2, 3, 4, 5].every(index => save.unlockedPorts.includes(index)));
+  for (let i = 0; i < 4; i++) recordHarborDelivery(save, 0, [jobsForPort(0)[i % 2]], true);
+  assert.equal(openHarbor(save, 2), false);
+  assert.equal(openHarbor(save, 1), true);
+  assert.deepEqual(save.unlockedPorts, [0, 1]);
+});
+
+test('each boat has a capacity, price, handling tradeoff and a working specialty', async () => {
+  const { BOATS, HARBOR_GATES, estimateCargoPay, voyageReceipt, usableCells, boatTraits, impactDamage, conditionHandling, repairCost, defaultSave } = await import('../src/model');
+  assert.equal(HARBOR_GATES.length, 25);
+  assert.equal(new Set(BOATS.map(boat => boat.ability)).size, BOATS.length);
+  assert.deepEqual(BOATS.map(usableCells), [12, 18, 22, 31, 44, 13, 26, 31, 36, 50, 8]);
+  assert.ok(BOATS[9].turnRate < BOATS[0].turnRate);
+  assert.ok(BOATS[9].price > BOATS[4].price);
+  assert.equal(impactDamage(BOATS[0], 'reef', 20), 15);
+  assert.equal(impactDamage(BOATS[2], 'rock', 20), 16);
+  assert.equal(boatTraits(BOATS[1]).deadline, 1.25);
+  assert.equal(boatTraits(BOATS[5]).vision, .85);
+  assert.equal(boatTraits(BOATS[6]).current, .6);
+  assert.equal(boatTraits(BOATS[8]).wind, .5);
+  assert.equal(boatTraits(BOATS[10]).sonarAudible, false);
+  assert.equal(conditionHandling(70), 1);
+  assert.ok(conditionHandling(50) < 1);
+  const save = defaultSave(); save.boatCondition[7] = 50;
+  assert.ok(repairCost(save, 7) < Math.ceil(50 * BOATS[7].repairRate));
+  const fragile = [jobsForPort(3).find(job => job.kind === 'fragile')!];
+  assert.ok(voyageReceipt(3, fragile, BOATS[3], false, 2, false).payout > voyageReceipt(3, fragile, BOATS[7], false, 2, false).payout);
+  assert.ok(estimateCargoPay(24, jobsForPort(24), BOATS[9]) < 2400, 'endless voyages do not multiply cash without bound');
 });
