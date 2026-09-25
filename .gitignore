@@ -9,3 +9,4 @@ premium-audit.json
 ios/App/Pods/
 ios/App/build/
 ios/DerivedData/
+supabase/.temp/
