@@ -544,7 +544,7 @@ function updateRun(dt: number): void {
     if (patrol.sound) {
       if (heardBySoundPatrol(distance, run.engineOn, run.speed)) heard = true;
     } else if (inVisionCone(patrol, run.x, run.z, (11.5 + run.patrolHeat * .12 + (run.hotCargo ? 2 : 0)) * sight.rangeMultiplier, sight.halfAngle)) spotted = true;
-    if (distance < 2.1) contact = true;
+    if (distance < (patrol.sound ? 2.75 : 2.65)) contact = true;
   }
   run.contact = contact ? run.contact + dt : Math.max(0, run.contact - dt * 1.5);
   run.soundExposure = heard ? run.soundExposure + dt : Math.max(0, run.soundExposure - dt * 1.8);

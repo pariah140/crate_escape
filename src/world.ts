@@ -90,6 +90,7 @@ function disposeModels(group: THREE.Object3D): void {
 
 function makeBoat(color: string, style: BoatStyle | 'patrol' = 'dinghy'): THREE.Group {
   const craft = new THREE.Group();
+  if (style === 'sailboat') craft.scale.setScalar(.78);
   const broad = ['trawler', 'freighter', 'catamaran', 'houseboat', 'barge'].includes(style);
   const long = ['cruiser', 'freighter', 'clipper', 'barge'].includes(style);
   const half = style === 'skiff' ? 0.92 : style === 'dinghy' || style === 'patrol' || style === 'sailboat' ? 1.28 : style === 'speedboat' ? 1.12 : style === 'barge' ? 1.92 : broad ? 1.65 : 1.4;
@@ -205,12 +206,48 @@ function makeBoat(color: string, style: BoatStyle | 'patrol' = 'dinghy'): THREE.
     cylinder(craft, '#f5f3d9', 0, 1.8, 1.38, .15, .22);
     cone(craft, '#ffce5c', 0, 2.1, 1.38, .25, .35, 5);
   }
-  if (style === 'patrol') cylinder(craft, '#ffe36b', 0, 2.62, cabinZ, .19, .15);
   const cargo = new THREE.Group(); cargo.name = 'deck-cargo'; craft.add(cargo);
-  ['#ffd95d', '#f49d77', '#8ed6ad'].forEach((c, i) => {
+  if (style !== 'patrol') ['#ffd95d', '#f49d77', '#8ed6ad'].forEach((c, i) => {
     const parcel = new THREE.Group(); parcel.position.set(i % 2 ? .38 : -.38, broad ? 2.1 + (i === 2 ? .22 : 0) : 1.92 + (i === 2 ? .22 : 0), style === 'freighter' ? .05 : back + .62);
     box(parcel, c, 0, 0, 0, .59, .42, .52); box(parcel, '#9a764e', 0, .01, 0, .05, .43, .54); cargo.add(parcel);
   });
+  return craft;
+}
+
+function makePatrolBoat(sound: boolean): THREE.Group {
+  const craft = makeBoat(sound ? '#7669a1' : '#3d7893', 'patrol');
+  // Distinctive working hull: strong sheer stripe, rescue fenders, twin engines and a watch mast.
+  for (const side of [-1, 1]) {
+    box(craft, sound ? '#d9c7ee' : '#f5d999', side * 1.16, 1.19, .14, .11, .16, 3.55);
+    const rescueRing = new THREE.Mesh(new THREE.TorusGeometry(.29, .085, 5, 12), mat(sound ? '#f4c878' : '#f18769'));
+    rescueRing.rotation.y = Math.PI / 2; rescueRing.position.set(side * 1.34, 1.72, -.72); craft.add(rescueRing);
+    for (const z of [-1.35, 1.15]) {
+      const fender = cylinder(craft, '#f0f1dc', side * 1.37, 1.22, z, .2, .67, 8);
+      fender.rotation.z = side * .14;
+    }
+    box(craft, '#33485b', side * .5, 1.36, -2.34, .35, .55, .5);
+    box(craft, '#e8ecdb', side * .48, 1.73, 1.45, .2, .17, .82);
+  }
+  tube(craft, '#fff4d4', [new THREE.Vector3(-1.05,1.72,-1.8), new THREE.Vector3(-1.08,2.05,-1.8), new THREE.Vector3(-1.08,2.05,.9), new THREE.Vector3(-.56,2.02,1.92)], .045);
+  tube(craft, '#fff4d4', [new THREE.Vector3(1.05,1.72,-1.8), new THREE.Vector3(1.08,2.05,-1.8), new THREE.Vector3(1.08,2.05,.9), new THREE.Vector3(.56,2.02,1.92)], .045);
+  box(craft, sound ? '#7e6aa2' : '#426d84', 0, 1.7, 1.31, 1.33, .09, 1.13);
+  cylinder(craft, '#f6e9c8', 0, 3.15, -.38, .075, 1.42, 8);
+  box(craft, '#f6e9c8', 0, 3.71, -.38, .82, .07, .07);
+  box(craft, '#a7d9d7', 0, 2.06, 1.42, .8, .26, .18);
+  cylinder(craft, '#f4e9c9', 0, 2.03, 1.36, .27, .25, 8);
+  if (sound) {
+    const dome = new THREE.Mesh(new THREE.IcosahedronGeometry(.46, 1), mat('#cfb9ef'));
+    dome.scale.y = .62; dome.position.set(0, 2.75, -.38); craft.add(dome);
+    for (const side of [-1, 1]) {
+      box(craft, '#cbb2ed', side * .74, 2.43, -.25, .43, .27, .13);
+      cylinder(craft, '#e3d5f6', side * .42, 3.66, -.38, .07, .19, 8);
+    }
+    cylinder(craft, '#e9cafa', 0, 3.85, -.38, .25, .18, 8);
+  } else {
+    cylinder(craft, '#ffd76c', 0, 2.79, -.38, .29, .27, 8);
+    cylinder(craft, '#40617a', 0, 2.95, -.38, .32, .09, 8);
+    for (const side of [-1, 1]) cylinder(craft, '#fff2c9', side * .4, 3.68, -.38, .09, .16, 8);
+  }
   return craft;
 }
 
@@ -491,6 +528,7 @@ export class World {
   private damageTime = 0;
   private elapsed = 0;
   private seaRoughness = 0;
+  private boatDraftOffset = .94;
   private width = 1;
   private height = 1;
 
@@ -622,6 +660,7 @@ export class World {
     this.scene.remove(this.boat);
     disposeModels(this.boat);
     this.boat = makeBoat(craft.color, craft.style);
+    this.boatDraftOffset = craft.style === 'sailboat' ? .73 : .94;
     const lamp = new THREE.SpotLight('#ffe5a6', 25, 32, .55, .68, 1.3);
     lamp.position.set(0, 2.9, 1.7);
     lamp.target.position.set(0, -.55, 12);
@@ -631,7 +670,8 @@ export class World {
     this.boatLamp = lamp; this.boatLampBulb = bulb;
     this.scene.add(this.boat);
     const size = craft.width >= 9 ? 1.55 : craft.width >= 8 ? 1.42 : craft.width >= 6 ? 1.22 : 1;
-    this.boatFoam.scale.set(1.68 * size, 2.55 * size, 1);
+    const visualScale = craft.style === 'sailboat' ? .78 : 1;
+    this.boatFoam.scale.set(1.68 * size * visualScale, 2.55 * size * visualScale, 1);
     this.setNightLighting(this.plan.night, false);
   }
 
@@ -713,7 +753,7 @@ export class World {
       const z = -4 + row * 11;
       const model = makeBoat(def.color, def.style); model.position.set(x, -.35, z); model.rotation.y = -.15; model.userData.boatIndex = index; model.getObjectByName('deck-cargo')!.visible = false; this.yard.add(model);
       this.yardBoats.set(index, model); this.yardBerths.set(index, new THREE.Vector3(x, 0, z));
-      const foam = makeHullFoam(index >= 3 ? 2.4 : 1.8, index >= 3 ? 3.3 : 2.5); foam.position.set(x, .05, z); this.yard.add(foam);
+      const foam = makeHullFoam(def.style === 'sailboat' ? 1.35 : index >= 3 ? 2.4 : 1.8, def.style === 'sailboat' ? 1.95 : index >= 3 ? 3.3 : 2.5); foam.position.set(x, .05, z); this.yard.add(foam);
       // A floating pontoon and repair gantry beside every berth.
       box(this.yard, '#aebcb7', x + 4, .17, z, 1.15, .4, 7.1);
       box(this.yard, '#f0cf77', x + 4, .4, z - 2.8, 1.15, .08, .25);
@@ -809,16 +849,13 @@ export class World {
     for (let i = 0; i < this.plan.patrols.length; i++) {
       const slot = this.plan.patrols[i]; const x = slot.x; const z = slot.z;
       const initial = patrolPose(i, 0, x, z, i * 1.8);
-      const mesh = makeBoat(slot.sound ? '#846aa1' : '#527798', 'patrol'); mesh.scale.setScalar(slot.sound ? .8 : .72); mesh.position.set(initial.x, -.68, initial.z); mesh.rotation.y = initial.heading; this.route.add(mesh);
-      if (slot.sound) {
-        cylinder(mesh, '#ffe6a2', 0, 3.75, -.3, .36, .14, 10);
-        cylinder(mesh, '#dcb7f1', 0, 3.47, -.3, .09, .62, 8);
-      }
-      const foam = makeHullFoam(1.22, 1.86); foam.position.set(x, .04, z); this.route.add(foam);
+      const patrolScale = slot.sound ? 1.13 : 1.04;
+      const mesh = makePatrolBoat(slot.sound); mesh.scale.setScalar(patrolScale); mesh.position.set(initial.x, -patrolScale * .94, initial.z); mesh.rotation.y = initial.heading; this.route.add(mesh);
+      const foam = makeHullFoam(1.35 * patrolScale, 2.05 * patrolScale); foam.position.set(x, .04, z); this.route.add(foam);
       const wake = new THREE.Mesh(new THREE.TorusGeometry(.58, .045, 3, 10, Math.PI), new THREE.MeshBasicMaterial({ color: '#d8f8e7', transparent: true, opacity: .32, depthWrite: false }));
       wake.rotation.x = -Math.PI / 2; wake.position.set(x, .05, z + 2); this.route.add(wake);
       const light = new THREE.Mesh(new THREE.ConeGeometry(3.6, 9, 18, 1, true), new THREE.MeshBasicMaterial({ color: '#fff1a0', transparent: true, opacity: .14, depthWrite: false, side: THREE.DoubleSide }));
-      light.rotation.x = -Math.PI / 2; light.position.set(0, 1.2, 4.8); light.visible = !slot.sound; mesh.add(light);
+      light.rotation.x = -Math.PI / 2; light.position.set(0, 1.35, 4.8); light.visible = !slot.sound; mesh.add(light);
       const ring = slot.sound ? new THREE.Mesh(new THREE.RingGeometry(11.5, 11.85, 48), new THREE.MeshBasicMaterial({ color: '#d6b6fa', transparent: true, opacity: .27, side: THREE.DoubleSide, depthWrite: false })) : null;
       if (ring) { ring.rotation.x = -Math.PI / 2; this.route.add(ring); }
       this.patrols.push({ x: initial.x, z: initial.z, baseX: x, baseZ: z, phase: i * 1.8, heading: initial.heading, chase: 0, sound: slot.sound, mesh, light, ring, foam, wake });
@@ -908,7 +945,7 @@ export class World {
     }
     const surface = this.waterHeight(x, z);
     const bob = Math.sin(this.elapsed * (2.15 + this.seaRoughness * .65) + z * 0.15) * (0.04 + this.seaRoughness * .19);
-    this.boat.position.set(x, surface - 0.94 + bob, z);
+    this.boat.position.set(x, surface - this.boatDraftOffset + bob, z);
     this.boat.rotation.set(
       Math.sin(this.elapsed * 1.75 + z * 0.08) * (0.038 + this.seaRoughness * .2) + vz * 0.003,
       this.heading + Math.sin(this.elapsed * 1.9 + z * .11) * this.seaRoughness * .075,
@@ -1063,15 +1100,15 @@ export class World {
       patrol.mesh.position.x = nextX;
       patrol.mesh.position.z = nextZ;
       const patrolSurface = this.waterHeight(patrol.mesh.position.x, patrol.mesh.position.z);
-      patrol.mesh.position.y = patrolSurface - 0.68 + Math.sin(this.elapsed * 2 + patrol.phase) * 0.02;
+      patrol.mesh.position.y = patrolSurface - patrol.mesh.scale.x * .94 + Math.sin(this.elapsed * 2 + patrol.phase) * 0.035;
       patrol.mesh.rotation.x = Math.sin(this.elapsed * 1.7 + patrol.phase) * 0.024;
       patrol.mesh.rotation.y = patrol.heading;
       patrol.mesh.rotation.z = Math.sin(this.elapsed * 2.1 + patrol.phase) * 0.035;
       patrol.foam.position.set(patrol.mesh.position.x, patrolSurface + 0.055, patrol.mesh.position.z);
       patrol.foam.rotation.z = -patrol.heading;
       (patrol.foam.material as THREE.MeshBasicMaterial).opacity = 0.38 + Math.sin(this.elapsed * 3.3 + patrol.phase) * 0.06;
-      const wakeX = patrol.x - Math.sin(patrol.heading) * 2;
-      const wakeZ = patrol.z - Math.cos(patrol.heading) * 2;
+      const wakeX = patrol.x - Math.sin(patrol.heading) * 2.8;
+      const wakeZ = patrol.z - Math.cos(patrol.heading) * 2.8;
       patrol.wake.position.set(wakeX, this.waterHeight(wakeX, wakeZ) + 0.06, wakeZ);
       patrol.wake.rotation.z = Math.PI - patrol.heading;
       (patrol.light.material as THREE.MeshBasicMaterial).opacity = 0.12 + Math.sin(this.elapsed * 2 + i) * 0.03;

@@ -85,6 +85,8 @@ The night light switch changes both the visible area around the boat and patrol 
 
 Hull profiles use shaped chines and gunwales instead of a flat slab. Deck equipment reinforces each boat's role: open benches and oars on the dinghy, a windscreen and twin motors on the speedboat, fishing gear on the trawler, a covered cabin on the cruiser, stacked containers on the freighter, two separate hulls on the catamaran, and a cottage roof on the houseboat. The backup sailboat uses an open cockpit, mast, boom, rigging, and angled, gently billowed triangular sails with a warm patch of color. Idle shipyard models show the boat without delivery crates so its shape is legible.
 
+The Patchwork Sailboat is scaled below the starter dinghy in both the yard and voyage, with its waterline and foam scaled to match. Patrol boats are larger working craft with railings, rescue rings, twin engines, deck gear and watch masts. Standard patrols have amber beacons and searchlights; acoustic patrols use a purple sonar dome and antenna array. Their visible size informs the contact radius.
+
 ## Harbor scenery
 
 Ports sit on layered low-poly shorelines with sandy or rocky rims, terrain colors suited to their biome, planted headlands, dock equipment and additional destination buildings. The lighthouse stands on a clear headland without palm fronds around its base. Destination coves have larger adjoining landforms and breakwaters so buildings read as part of a harbor rather than floating in open water.
