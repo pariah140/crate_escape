@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { HARBORS } from '../src/harbors';
-import { canDock, harborCourseSlope, levelPlan, channelCenter, channelHalfWidth, offshoreState, offshoreWaveStrength, roughWaterPush, currentPush, destinationX, weatherPush, ROUTE_END } from '../src/levels';
+import { canDock, harborCourseSlope, levelPlan, channelCenter, channelHalfWidth, offshoreState, offshoreWaveStrength, roughWaterPush, currentPush, destinationX, destinationZ, weatherPush } from '../src/levels';
 
 test('all 25 harbors have distinct fixed coastal routes', () => {
   assert.equal(HARBORS.length, 25);
@@ -26,6 +26,9 @@ test('voyages continue beyond 100 while adding hazards and later mission feature
   const distant = levelPlan(1001, 24);
   assert.deepEqual(levelPlan(145, 2), levelPlan(145, 2));
   assert.ok(late.hazards.length > early.hazards.length);
+  assert.ok(early.routeEnd < late.routeEnd);
+  assert.ok(levelPlan(1, 0).routeEnd < levelPlan(1, 12).routeEnd);
+  assert.ok(levelPlan(1, 12).routeEnd < levelPlan(1, 24).routeEnd);
   assert.equal(endless.number, 101);
   assert.equal(distant.number, 1001);
   assert.notDeepEqual(endless.hazards, late.hazards);
@@ -40,7 +43,7 @@ test('voyages continue beyond 100 while adding hazards and later mission feature
 
 test('coastal physics, hazards and destination agree with the curved route', () => {
   const plan = levelPlan(72, 17);
-  for (let z = 0; z <= 520; z += 13) {
+  for (let z = 0; z <= plan.routeEnd; z += 13) {
     const center = channelCenter(plan, z);
     const half = channelHalfWidth(plan, z);
     assert.ok(half > 13);
@@ -51,7 +54,7 @@ test('coastal physics, hazards and destination agree with the curved route', () 
     assert.ok(offshoreState(plan, center + half + 23, z).push < 0);
     assert.ok(offshoreState(plan, center - half - 23, z).push > 0);
   }
-  assert.equal(destinationX(plan), channelCenter(plan, 532) - 1.8);
+  assert.equal(destinationX(plan), channelCenter(plan, destinationZ(plan) + 3) + 5.2);
   const current = plan.currents[0];
   assert.notEqual(currentPush(plan, current.x, current.z, 0), 0);
   assert.equal(currentPush(plan, 100, 100, 0), 0);
@@ -63,11 +66,25 @@ test('every harbor has a distinct off-north course and docking requires reaching
   assert.equal(new Set(slopes).size, HARBORS.length);
   for (let port = 0; port < HARBORS.length; port++) {
     const plan = levelPlan(1, port);
-    const bearing = Math.atan2(destinationX(plan), 532);
+    const bearing = Math.atan2(destinationX(plan), destinationZ(plan));
     assert.ok(Math.abs(bearing) > Math.PI / 16);
-    assert.equal(canDock(plan, destinationX(plan), ROUTE_END), true);
-    assert.equal(canDock(plan, destinationX(plan) + 20, ROUTE_END), false);
-    assert.equal(canDock(plan, destinationX(plan), ROUTE_END - 1), false);
+    assert.equal(canDock(plan, destinationX(plan), plan.routeEnd), true);
+    assert.equal(canDock(plan, destinationX(plan) + 20, plan.routeEnd), false);
+    assert.equal(canDock(plan, destinationX(plan), plan.routeEnd - 1), false);
+  }
+});
+
+test('encounters fill each voyage with biome hazards and leave a navigable gap', () => {
+  for (const [level, port] of [[1, 0], [36, 9], [85, 17], [145, 24]]) {
+    const plan = levelPlan(level, port);
+    assert.ok(plan.hazards.every(hazard => hazard.z > 24 && hazard.z < plan.routeEnd - 20));
+    const encounterHazards = plan.hazards.filter(hazard => hazard.kind === 'reef' || hazard.kind === 'driftwood');
+    assert.ok(encounterHazards.length > 0 || plan.hazards.some(hazard => hazard.kind === 'iceberg'));
+    for (let z = 35; z < plan.routeEnd - 25; z += 5) {
+      const center = channelCenter(plan, z);
+      const freeAtCenter = plan.hazards.every(hazard => Math.hypot(center - hazard.x, z - hazard.z) > hazard.radius + 1.2);
+      assert.ok(freeAtCenter, `blocked route centre at ${level}/${port}/${z}`);
+    }
   }
 });
 

@@ -182,10 +182,11 @@ button:active:not(:disabled) { transform: translateY(2px); }
 @keyframes fog-breathe { to { opacity: .55; transform: translateX(2%); } }
 @keyframes wind-drift { to { transform: translateX(12%); } }
 .port-compass { position: absolute; z-index: 4; left: 23px; bottom: max(30px, env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 8px; padding: 7px 12px 7px 7px; border: 2px solid #ffefd0; border-radius: 34px; background: rgba(5,62,78,.94); box-shadow: 0 5px 0 rgba(5,47,58,.72); }
-.compass-face { position: relative; width: 50px; height: 50px; border: 3px solid #e9bf78; border-radius: 50%; background: radial-gradient(circle, #f6efcf 0 13%, #426b79 14% 16%, #193f55 17%); box-shadow: inset 0 0 0 2px #fff0cb; }
+.compass-face { position: relative; width: 56px; height: 56px; flex: none; border: 3px solid #e9bf78; border-radius: 50%; background: radial-gradient(circle, #f6efcf 0 12%, #426b79 13% 15%, #193f55 16%); box-shadow: inset 0 0 0 2px #fff0cb; }
 .compass-n { position: absolute; top: -11px; left: 50%; transform: translateX(-50%); font: 900 8px ui-monospace, monospace; color: #f6d792; }
 .compass-harbor { position: absolute; left: calc(50% + var(--port-x, 0px)); top: calc(50% + var(--port-y, -17px)); transform: translate(-50%, -50%); display: grid; place-items: center; width: 16px; height: 16px; border: 1px solid #fff1ca; border-radius: 50%; background: #f2c56b; color: #193f55; font-size: 10px; box-shadow: 0 1px 4px #092b41; }
-.compass-needle { position: absolute; top: 50%; left: 50%; transform-origin: center; color: #ffb879; font-size: 24px; line-height: 1; text-shadow: 0 1px 1px #132e40; transition: transform .18s ease-out; }
+.compass-needle { position: absolute; top: 50%; left: 50%; transform-origin: center; color: #fff0d0; font-size: 25px; line-height: 1; text-shadow: 0 1px 2px #132e40; transition: transform .18s ease-out; }
+.compass-copy .heading-label { color: #fff0d0; font-size: 9px; letter-spacing: .025em; }
 .compass-copy { display: flex; flex-direction: column; gap: 2px; white-space: nowrap; }
 .compass-copy strong { max-width: 138px; overflow: hidden; text-overflow: ellipsis; font: 900 9px ui-monospace, monospace; letter-spacing: .06em; color: #ffda95; }
 .compass-copy span { font: 900 13px ui-monospace, monospace; }

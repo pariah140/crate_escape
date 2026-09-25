@@ -3,7 +3,7 @@ import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Share } from '@capacitor/share';
 import { World } from './world';
 import { advanceMotion } from './piloting';
-import { canDock, channelCenter, currentPush, destinationX, levelPlan, offshoreState, roughWaterPush, ROUTE_END, weatherPush, type LevelPlan } from './levels';
+import { canDock, channelCenter, currentPush, destinationX, destinationZ, levelPlan, offshoreState, roughWaterPush, weatherPush, type LevelPlan } from './levels';
 import { heardBySoundPatrol, inVisionCone, sightProfile } from './patrols';
 import {
   BOATS, PORTS, HARBORS, SHAPE_NAMES, canFitAll, canPlace, jobById, jobsForPort,
@@ -200,7 +200,7 @@ function renderRun(): void {
     <div class="run-top"><div class="run-stat"><span>ROUTE</span><strong id="route-progress">0%</strong><div class="meter"><i id="route-fill"></i></div></div><div class="run-stat"><span>HULL</span><strong id="hull-number">100%</strong><div class="meter"><i id="hull-fill"></i></div></div><div class="run-stat heat-stat"><span>HEAT</span><strong id="heat-number">LOW</strong><div class="meter"><i id="heat-fill"></i></div></div></div>
     <div class="voyage-tag">VOYAGE ${currentPlan.number} · ${HARBORS[currentPlan.port].name.toUpperCase()} · ${currentPlan.night ? 'NIGHT · ' : ''}${currentPlan.weather.toUpperCase()}</div>
     <div id="sea-warning" class="sea-warning" role="status" aria-live="polite"></div>
-    <div id="port-compass" class="port-compass" role="img" aria-label="Compass pointing toward ${escapeHtml(HARBORS[currentPlan.port].name)}"><div class="compass-face"><span class="compass-n">N</span><div id="compass-needle" class="compass-needle">➤</div><span id="compass-port" class="compass-harbor">⚓</span></div><div class="compass-copy"><strong>${escapeHtml(HARBORS[currentPlan.port].name.toUpperCase())}</strong><span id="port-distance">520 m</span></div></div>
+    <div id="port-compass" class="port-compass" role="img" aria-label="Boat heading north; port bearing north"><div class="compass-face"><span class="compass-n">N</span><div id="compass-needle" class="compass-needle">▲</div><span id="compass-port" class="compass-harbor">⚓</span></div><div class="compass-copy"><span id="heading-label" class="heading-label">▲ HEADING N</span><strong>${escapeHtml(HARBORS[currentPlan.port].name.toUpperCase())}</strong><span id="port-distance">⚓ N · ${Math.round(currentPlan.routeEnd)} m</span></div></div>
     <div class="engine-controls"><div id="engine-status" class="engine-status">ENGINE IDLE</div>${currentPlan.night ? `<button id="light-toggle" class="light-toggle" type="button" data-action="toggle-lights" aria-pressed="${run?.lightsOn ? 'true' : 'false'}" aria-label="Toggle boat lights">☼ LIGHTS ON</button>` : ''}<button class="cut-engine" type="button" data-action="cut-engine" aria-label="Cut engine and coast">✦ CUT ENGINE</button></div>
     <div class="run-bottom"><div class="run-instruction"><strong id="run-instruction-title">DRAG TO PILOT</strong><span id="run-instruction-detail">Tap a spot or drag · release to coast</span></div><div id="run-timer" class="run-timer">00:00</div></div>
     ${run?.tutorialOpen ? `<div class="sound-tutorial"><div class="sound-card"><span class="eyebrow">NEW PATROL · ACOUSTIC LISTENING</span><h2>Quiet waters, loud engines.</h2><div class="sound-demo" aria-hidden="true"><span class="demo-boat">🚤</span><span class="demo-wave wave-one"></span><span class="demo-wave wave-two"></span><span class="demo-patrol">◉</span></div><p>Build speed before its listening ring. Then release the drag or tap target to cut the engine and coast silently through. You can steer again once clear.</p><button class="primary-button full" type="button" data-action="dismiss-sound-tutorial">Got it · set sail →</button></div></div>` : ''}
@@ -301,12 +301,12 @@ function renderMarket(): void {
 
 function harborMiniRoute(index: number): string {
   const plan = levelPlan(1, index);
-  const scale = 40 / Math.max(80, Math.abs(channelCenter(plan, ROUTE_END)));
+  const scale = 40 / Math.max(80, Math.abs(channelCenter(plan, plan.routeEnd)));
   const points = Array.from({ length: 13 }, (_, i) => {
-    const z = i * ROUTE_END / 12;
+    const z = i * plan.routeEnd / 12;
     return `${(50 + channelCenter(plan, z) * scale).toFixed(1)},${(92 - i * 7).toFixed(1)}`;
   }).join(' ');
-  return `<svg class="map-mini-route" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polyline points="${points}" fill="none" stroke="#fff8df" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" opacity=".84"/><polyline points="${points}" fill="none" stroke="#398b94" stroke-width="2" stroke-dasharray="2 3"/><circle cx="50" cy="92" r="3" fill="#f8ce6a"/><circle cx="${(50 + channelCenter(plan, ROUTE_END) * scale).toFixed(1)}" cy="8" r="3" fill="#f78c70"/></svg>`;
+  return `<svg class="map-mini-route" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polyline points="${points}" fill="none" stroke="#fff8df" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" opacity=".84"/><polyline points="${points}" fill="none" stroke="#398b94" stroke-width="2" stroke-dasharray="2 3"/><circle cx="50" cy="92" r="3" fill="#f8ce6a"/><circle cx="${(50 + channelCenter(plan, plan.routeEnd) * scale).toFixed(1)}" cy="8" r="3" fill="#f78c70"/></svg>`;
 }
 
 function renderMap(): void {
@@ -390,14 +390,14 @@ function beginRun(): void {
   const maxHull = boat().hull + boatUpgrade(save).hull * 15;
   const patrolHeat = jobs.reduce((sum, job) => sum + job.heat, 0);
   const hotCargo = jobs.some(job => job.kind === 'hot');
-  run = { x: 0, z: 0, vx: 0, vz: 0, speed: 0, hull: maxHull * (save.boatCondition[save.boat] ?? 100) / 100, maxHull, heat: Math.min(65, patrolHeat * 4 + (hotCargo ? 8 : 0)), contact: 0, damageCooldown: 0, collisions: 0, elapsed: 0, holding: false, pointer: null, pointerX: 0, pointerY: 0, pointerStartX: 0, pointerStartY: 0, pointerDownAt: 0, pointerMoved: false, dragOriginX: 0, dragOriginZ: 0, tapTarget: null, deadline: jobs.some(job => job.kind === 'perishable') ? 70 + (Math.hypot(destinationX(currentPlan), 532) - 532) / 9.2 : Infinity, patrolHeat, hotCargo, ending: false, heading: 0, engineOn: false, lightsOn: currentPlan.night, tutorialOpen: false, tutorialPending: currentPlan.patrols.some(patrol => patrol.sound) && !save.soundTutorialSeen, soundExposure: 0, offshoreTime: 0 };
+  run = { x: 0, z: 0, vx: 0, vz: 0, speed: 0, hull: maxHull * (save.boatCondition[save.boat] ?? 100) / 100, maxHull, heat: Math.min(65, patrolHeat * 4 + (hotCargo ? 8 : 0)), contact: 0, damageCooldown: 0, collisions: 0, elapsed: 0, holding: false, pointer: null, pointerX: 0, pointerY: 0, pointerStartX: 0, pointerStartY: 0, pointerDownAt: 0, pointerMoved: false, dragOriginX: 0, dragOriginZ: 0, tapTarget: null, deadline: jobs.some(job => job.kind === 'perishable') ? 25 + currentPlan.routeEnd / 5.2 : Infinity, patrolHeat, hotCargo, ending: false, heading: 0, engineOn: false, lightsOn: currentPlan.night, tutorialOpen: false, tutorialPending: currentPlan.patrols.some(patrol => patrol.sound) && !save.soundTutorialSeen, soundExposure: 0, offshoreTime: 0 };
   world.setNightLighting(currentPlan.night, run.lightsOn);
   heldKeys.clear(); phase = 'run'; render(); beep(400, 0.15, 'triangle'); notify('Cargo aboard. Tap the water or drag to pilot!', 'success');
 }
 
 function updateHud(): void {
   if (!run) return;
-  const progress = Math.max(0, Math.min(100, Math.round(run.z / ROUTE_END * 100)));
+  const progress = Math.max(0, Math.min(100, Math.round(run.z / currentPlan.routeEnd * 100)));
   const hull = Math.max(0, Math.round(run.hull / run.maxHull * 100));
   const heat = Math.round(run.heat);
   const set = (id: string, value: string) => { const el = document.getElementById(id); if (el) el.textContent = value; };
@@ -409,11 +409,13 @@ function updateHud(): void {
   const seconds = Math.floor(run.elapsed % 60).toString().padStart(2, '0');
   set('run-timer', `${minutes}:${seconds}`);
   const portDx = destinationX(currentPlan) - run.x;
-  const portDz = 532 - run.z;
+  const portDz = destinationZ(currentPlan) - run.z;
   const portBearing = Math.atan2(portDx, portDz);
   const points = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
   const direction = points[((Math.round(portBearing / (Math.PI / 8)) % 16) + 16) % 16];
-  set('port-distance', `${direction} · ${Math.round(Math.hypot(portDx, portDz))} m`);
+  const heading = points[((Math.round(run.heading / (Math.PI / 8)) % 16) + 16) % 16];
+  set('heading-label', `▲ HEADING ${heading}`);
+  set('port-distance', `⚓ ${direction} · ${Math.round(Math.hypot(portDx, portDz))} m`);
   set('engine-status', run.engineOn ? 'ENGINE ON · PATROLS CAN HEAR' : 'ENGINE CUT · COASTING');
   const seaWarning = document.getElementById('sea-warning');
   if (seaWarning) {
@@ -426,10 +428,10 @@ function updateHud(): void {
   const darkness = document.getElementById('night-visibility');
   if (darkness) darkness.className = `night-visibility ${run.lightsOn ? 'lights-on' : 'lights-off'}`;
   const needle = document.getElementById('compass-needle');
-  if (needle) needle.style.transform = `translate(-50%, -50%) rotate(${portBearing - Math.PI / 2}rad)`;
+  if (needle) needle.style.transform = `translate(-50%, -50%) rotate(${run.heading}rad)`;
   const portMark = document.getElementById('compass-port');
   if (portMark) { portMark.style.setProperty('--port-x', `${Math.sin(portBearing) * 17}px`); portMark.style.setProperty('--port-y', `${-Math.cos(portBearing) * 17}px`); }
-  document.getElementById('port-compass')?.setAttribute('aria-label', `${HARBORS[currentPlan.port].name} lies ${direction}, ${Math.round(Math.hypot(portDx, portDz))} metres away`);
+  document.getElementById('port-compass')?.setAttribute('aria-label', `Boat heading ${heading}. ${HARBORS[currentPlan.port].name} lies ${direction}, ${Math.round(Math.hypot(portDx, portDz))} metres away`);
 }
 
 function endRun(won: boolean, reason: string): void {
@@ -508,7 +510,7 @@ function updateRun(dt: number): void {
   if (run.holding && run.pointer !== null) target = dragPoint();
   else if (!heldKeys.size && run.tapTarget) target = run.tapTarget;
   if (target && Math.hypot(target.x - run.x, target.z - run.z) < .65 && !run.holding) { run.tapTarget = null; target = null; }
-  if (target) target = { x: target.x, z: Math.max(0, Math.min(ROUTE_END, target.z)) };
+  if (target) target = { x: target.x, z: Math.max(0, Math.min(currentPlan.routeEnd, target.z)) };
   const dx = Number(heldKeys.has('arrowright') || heldKeys.has('d')) - Number(heldKeys.has('arrowleft') || heldKeys.has('a'));
   const dz = Number(heldKeys.has('arrowup') || heldKeys.has('w')) - Number(heldKeys.has('arrowdown') || heldKeys.has('s'));
   run.engineOn = Boolean(target || dx || dz);
@@ -522,7 +524,7 @@ function updateRun(dt: number): void {
   const lateral = currentPush(currentPlan, motion.x, motion.z, run.elapsed) + weatherPush(currentPlan, run.elapsed) + offshore.push + buffeting.x;
   run.vx = (motion.vx + lateral * dt) * (1 - offshore.drag * dt); run.vz = motion.vz * (1 - offshore.drag * dt);
   run.vz += buffeting.z * dt;
-  run.z = Math.max(-2, Math.min(ROUTE_END, motion.z + buffeting.z * dt * dt * .5));
+  run.z = Math.max(-2, Math.min(currentPlan.routeEnd, motion.z + buffeting.z * dt * dt * .5));
   run.x = motion.x + lateral * dt * dt * .5;
   const newOffshore = offshoreState(currentPlan, run.x, run.z);
   run.offshoreTime = newOffshore.zone === 'danger' ? run.offshoreTime + dt : 0;
@@ -552,13 +554,13 @@ function updateRun(dt: number): void {
   const title = document.getElementById('run-instruction-title');
   const detail = document.getElementById('run-instruction-detail');
   if (title && detail && !run.ending) {
-    title.textContent = heard ? 'SONAR HEARS YOU' : run.z > ROUTE_END - 22 ? 'PORT APPROACH' : newOffshore.zone === 'rough' || newOffshore.zone === 'danger' ? 'ROUGH WATER' : !run.engineOn && currentPlan.patrols.some(p => p.sound) ? 'SILENT GLIDE' : currentPlan.weather === 'storm' ? 'HEAVY WEATHER' : 'DRAG TO PILOT';
-    detail.textContent = heard ? 'Release to cut the engine and coast' : run.z > ROUTE_END - 22 ? 'Follow the compass and line up with the pier' : newOffshore.zone === 'rough' || newOffshore.zone === 'danger' ? 'Waves buffet the hull · steering responds more slowly' : !run.engineOn && currentPlan.patrols.some(p => p.sound) ? 'Momentum carries you past listening patrols' : currentPlan.currents.some(c => Math.hypot(run!.x - c.x, run!.z - c.z) < c.radius) ? 'Strong current · steer against the flow' : currentPlan.night ? run.lightsOn ? 'Lights reveal hazards · patrols can spot you sooner · L to toggle' : 'Dark water hides hazards · L to switch lights on' : 'Tap a spot or drag · release to coast';
+    title.textContent = heard ? 'SONAR HEARS YOU' : run.z > currentPlan.routeEnd - 22 ? 'PORT APPROACH' : newOffshore.zone === 'rough' || newOffshore.zone === 'danger' ? 'ROUGH WATER' : !run.engineOn && currentPlan.patrols.some(p => p.sound) ? 'SILENT GLIDE' : currentPlan.weather === 'storm' ? 'HEAVY WEATHER' : 'DRAG TO PILOT';
+    detail.textContent = heard ? 'Release to cut the engine and coast' : run.z > currentPlan.routeEnd - 22 ? 'Follow the compass and line up with the pier' : newOffshore.zone === 'rough' || newOffshore.zone === 'danger' ? 'Waves buffet the hull · steering responds more slowly' : !run.engineOn && currentPlan.patrols.some(p => p.sound) ? 'Momentum carries you past listening patrols' : currentPlan.currents.some(c => Math.hypot(run!.x - c.x, run!.z - c.z) < c.radius) ? 'Strong current · steer against the flow' : currentPlan.night ? run.lightsOn ? 'Lights reveal hazards · patrols can spot you sooner · L to toggle' : 'Dark water hides hazards · L to switch lights on' : 'Tap a spot or drag · release to coast';
   }
   if (run.contact >= 1.5 || run.soundExposure >= 1.8 || run.heat >= 100) { run.ending = true; showImpact('CAUGHT!'); window.setTimeout(() => endRun(false, 'caught'), 650); return; }
   for (const hazard of world.hazards) {
     if (Math.hypot(run.x - hazard.x, run.z - hazard.z) < hazard.radius + .85 && run.damageCooldown === 0) {
-      const damage = hazard.kind === 'rock' ? 24 : hazard.kind === 'iceberg' ? 27 : hazard.kind === 'sandbank' ? 17 : 12;
+      const damage = hazard.kind === 'rock' ? 24 : hazard.kind === 'iceberg' ? 27 : hazard.kind === 'sandbank' || hazard.kind === 'reef' ? 17 : hazard.kind === 'driftwood' ? 13 : 12;
       run.hull = Math.max(0, run.hull - damage); run.collisions++; run.damageCooldown = 1.25;
       const awayX = run.x - hazard.x, awayZ = run.z - hazard.z;
       const awayLength = Math.hypot(awayX, awayZ) || 1;
@@ -566,7 +568,7 @@ function updateRun(dt: number): void {
       run.speed = Math.hypot(run.vx, run.vz); run.tapTarget = null;
       showImpact(`−${damage} HULL`);
       beep(135, .22, 'sawtooth'); Haptics.impact({ style: ImpactStyle.Heavy }).catch(() => undefined);
-      notify(hazard.kind === 'rock' ? 'Rock! Steer into open water.' : hazard.kind === 'iceberg' ? 'Iceberg! Watch the floating ice.' : hazard.kind === 'sandbank' ? 'Sandbank! The shallows scrape your hull.' : 'Buoy bump! Watch the channel.', 'danger');
+      notify(hazard.kind === 'rock' ? 'Rock! Steer into open water.' : hazard.kind === 'iceberg' ? 'Iceberg! Watch the floating ice.' : hazard.kind === 'sandbank' ? 'Sandbank! The shallows scrape your hull.' : hazard.kind === 'reef' ? 'Reef! Look for breaking water around the coral.' : hazard.kind === 'driftwood' ? 'Floating timber! Give the debris a wide berth.' : 'Buoy bump! Watch the channel.', 'danger');
       if (run.hull <= 0) { run.ending = true; window.setTimeout(() => endRun(false, 'sunk'), 650); return; }
     }
   }

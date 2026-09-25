@@ -1,13 +1,12 @@
 import { HARBORS } from './harbors';
 
-export const ROUTE_END = 520;
 export type Weather = 'clear' | 'wind' | 'rain' | 'fog' | 'storm' | 'snow';
-export type HazardKind = 'rock' | 'buoy' | 'sandbank' | 'iceberg';
+export type HazardKind = 'rock' | 'buoy' | 'sandbank' | 'iceberg' | 'reef' | 'driftwood';
 export interface RouteHazard { x: number; z: number; radius: number; kind: HazardKind }
 export interface CurrentZone { x: number; z: number; radius: number; direction: number; strength: number }
 export interface PatrolSlot { x: number; z: number; sound: boolean }
 export interface LevelPlan {
-  number: number; port: number; channelWidth: number; hazards: RouteHazard[];
+  number: number; port: number; routeEnd: number; channelWidth: number; hazards: RouteHazard[];
   currents: CurrentZone[]; patrols: PatrolSlot[]; weather: Weather; night: boolean;
   wind: number; payoutMultiplier: number;
 }
@@ -47,9 +46,10 @@ export function roughWaterPush(plan: LevelPlan, x: number, z: number, time: numb
   return { x: swell * (Math.sin(time * 2.7 + z * .16) * 2.7 + Math.sin(time * 1.4 + x * .12) * 1.5),
     z: swell * (Math.cos(time * 2.25 + x * .18) * 1.8) };
 }
-export function destinationX(plan: LevelPlan): number { return channelCenter(plan, 532) - 1.8; }
+export function destinationZ(plan: LevelPlan): number { return plan.routeEnd + 12; }
+export function destinationX(plan: LevelPlan): number { return channelCenter(plan, destinationZ(plan) + 3) + 5.2; }
 export function canDock(plan: LevelPlan, x: number, z: number): boolean {
-  return z >= ROUTE_END && Math.abs(x - destinationX(plan)) <= 8;
+  return z >= plan.routeEnd && Math.abs(x - destinationX(plan)) <= 7;
 }
 
 export function levelPlan(number: number, port: number): LevelPlan {
@@ -58,8 +58,9 @@ export function levelPlan(number: number, port: number): LevelPlan {
   const harbor = HARBORS[harborIndex];
   const region = Math.floor(harborIndex / 5);
   const tier = Math.min(1, (level - 1) / 99);
+  const routeEnd = Math.min(670, 185 + harborIndex * 11 + Math.min(100, level - 1) * 2.1);
   const channelWidth = 20 - tier * 3.3 - region * .35 + (harborIndex % 3) * .3;
-  const rockCount = Math.min(18, 4 + Math.floor((level - 1) / 9) + region + (harbor.biome === 'cliff' || harbor.biome === 'volcanic' ? 2 : 0));
+  const rockCount = Math.min(20, 3 + Math.floor((level - 1) / 10) + Math.floor(harborIndex / 4) + (harbor.biome === 'cliff' || harbor.biome === 'volcanic' ? 2 : 0));
   const sandCount = level < 8 && harborIndex < 2 ? 0 : Math.min(9, 1 + Math.floor(Math.max(0, level - 8) / 15) + Math.floor(region / 2) + (harbor.biome === 'reef' ? 2 : harbor.biome === 'ice' ? 1 : 0));
   const currentCount = level < 14 && harborIndex < 5 ? 0 : Math.min(7, 1 + Math.floor(Math.max(0, level - 14) / 25) + Math.floor(region / 2) + (harbor.biome === 'marsh' ? 2 : 0));
   const patrolCount = Math.min(10, 2 + Math.floor((level - 1) / 17) + Math.floor(region / 2));
@@ -70,45 +71,62 @@ export function levelPlan(number: number, port: number): LevelPlan {
   else if (level >= 16 && (level + harborIndex) % 2 === 0) weather = 'wind';
   if (harbor.biome === 'ice' && (level + harborIndex) % 4 !== 0) weather = 'snow';
   const night = level >= 61 && ((level + harborIndex) % 3 !== 0 || harborIndex >= 20);
-  const plan: LevelPlan = { number: level, port: harborIndex, channelWidth, hazards: [], currents: [], patrols: [], weather, night,
+  const plan: LevelPlan = { number: level, port: harborIndex, routeEnd, channelWidth, hazards: [], currents: [], patrols: [], weather, night,
     wind: weather === 'wind' ? 1.3 + tier * 1.7 : weather === 'storm' ? 2.8 + tier * 1.8 : weather === 'snow' ? .8 + tier : weather === 'rain' ? .55 : 0,
     payoutMultiplier: 1 + Math.log2(level) * .085 + harborIndex * .018,
   };
   for (let i = 0; i < rockCount; i++) {
     const seed = harborIndex * 613 + i * 17 + (i >= 4 ? level * 37 : 0);
-    const z = 38 + i * 460 / Math.max(rockCount - 1, 1) + (hash(seed) - .5) * 12;
+    const z = 34 + i * (routeEnd - 68) / Math.max(rockCount - 1, 1) + (hash(seed) - .5) * 9;
     const side = hash(seed + 77) > .5 ? 1 : -1;
     const x = channelCenter(plan, z) + side * (3.5 + hash(seed + 13) * (channelWidth - 8));
     plan.hazards.push({ x, z, radius: harbor.biome === 'ice' ? 1.6 + hash(seed + 31) * .7 : 1.2 + hash(seed + 31) * .55, kind: harbor.biome === 'ice' ? 'iceberg' : 'rock' });
   }
   for (let i = 0; i < sandCount; i++) {
     const seed = harborIndex * 127 + i * 11 + (i >= 2 ? level * 47 : 0);
-    const z = 68 + i * 420 / Math.max(sandCount, 1) + (hash(seed) - .5) * 19;
+    const z = 48 + i * (routeEnd - 94) / Math.max(sandCount, 1) + (hash(seed) - .5) * 12;
     const side = (i + harborIndex) % 2 ? -1 : 1;
     plan.hazards.push({ x: channelCenter(plan, z) + side * (channelWidth - 4.2 - hash(seed + 7) * 2.5), z, radius: 2.15 + tier * .75, kind: 'sandbank' });
   }
   const buoyCount = Math.min(12, 5 + Math.floor(level / 14));
   for (let i = 0; i < buoyCount; i++) {
-    const z = 28 + i * 470 / buoyCount;
+    const z = 28 + i * (routeEnd - 54) / buoyCount;
     plan.hazards.push({ x: channelCenter(plan, z) + (i % 2 ? -1 : 1) * (channelHalfWidth(plan, z) - 1.9), z, radius: .55, kind: 'buoy' });
   }
   // Sparse offshore hazards give each coast its own readable character beyond the marked route.
   if (['reef', 'cliff', 'volcanic', 'ice'].includes(harbor.biome)) {
     for (let i = 0; i < 6; i++) {
-      const z = 65 + i * 79 + hash(harborIndex * 91 + i) * 18;
+      const z = 42 + i * (routeEnd - 88) / 6 + hash(harborIndex * 91 + i) * 9;
       const side = i % 2 ? -1 : 1;
       const kind: HazardKind = harbor.biome === 'reef' ? 'sandbank' : harbor.biome === 'ice' ? 'iceberg' : 'rock';
       plan.hazards.push({ x: channelCenter(plan, z) + side * (channelHalfWidth(plan, z) + 14 + hash(i * 13 + harborIndex) * 6), z,
         radius: kind === 'sandbank' ? 2.5 : kind === 'iceberg' ? 2.1 : 1.7, kind });
     }
   }
+  // Readable encounter pockets occupy different parts of each voyage. The centre always has a navigable gap.
+  const encounterCount = Math.min(16, 2 + Math.floor(harborIndex / 4) + Math.floor((level - 1) / 12));
+  for (let i = 0; i < encounterCount; i++) {
+    const seed = harborIndex * 157 + level * 19 + i * 23;
+    const z = 51 + (i + .45 + hash(seed) * .18) * (routeEnd - 105) / encounterCount;
+    const side = (i + harborIndex) % 2 ? -1 : 1;
+    const kind: HazardKind = harbor.biome === 'reef' || (harborIndex > 5 && i % 4 === 0) ? 'reef'
+      : harbor.biome === 'ice' ? 'iceberg' : i % 3 === 1 ? 'driftwood' : 'rock';
+    const radius = kind === 'reef' ? 2.7 + tier * .45 : kind === 'driftwood' ? 1.75 : kind === 'iceberg' ? 2.0 : 1.55;
+    const offset = 5.5 + hash(seed + 8) * 6.5;
+    plan.hazards.push({ x: channelCenter(plan, z) + side * offset, z, radius, kind });
+    if (harborIndex >= 8 && i % 3 === 0) {
+      const partnerZ = z + 4.2;
+      plan.hazards.push({ x: channelCenter(plan, partnerZ) - side * (8.5 + hash(seed + 17) * 3), z: partnerZ,
+        radius: harbor.biome === 'ice' ? 1.6 : 1.4, kind: harbor.biome === 'ice' ? 'iceberg' : 'rock' });
+    }
+  }
   plan.currents = Array.from({ length: currentCount }, (_, i) => {
-    const z = 92 + i * 365 / Math.max(currentCount, 1) + hash(level * 61 + i + harborIndex * 9) * 28;
+    const z = 62 + i * (routeEnd - 112) / Math.max(currentCount, 1) + hash(level * 61 + i + harborIndex * 9) * 12;
     return { x: channelCenter(plan, z) + (i % 2 ? -1 : 1) * (2 + hash(level * 13 + i) * 5), z,
       radius: 4.2 + tier * 1.7, direction: i % 2 ? -1 : 1, strength: 1.6 + tier * 1.8 + region * .2 };
   });
   plan.patrols = Array.from({ length: patrolCount }, (_, i) => {
-    const z = 64 + i * 415 / Math.max(patrolCount - 1, 1);
+    const z = 60 + i * (routeEnd - 115) / Math.max(patrolCount - 1, 1);
     return { x: channelCenter(plan, z) + (i % 2 ? -1 : 1) * (3.7 + hash(harborIndex * 73 + i) * 1.5), z,
       sound: level >= 26 && (i === Math.floor(patrolCount / 2) || (level >= 55 && i % 4 === 1)) };
   });
