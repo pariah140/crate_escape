@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { patrolPose } from './patrols';
-import { channelCenter, channelHalfWidth, destinationX, levelPlan, offshoreState, type HazardKind, type LevelPlan } from './levels';
+import { channelCenter, channelHalfWidth, destinationX, harborCourseSlope, levelPlan, offshoreState, offshoreWaveStrength, type HazardKind, type LevelPlan } from './levels';
 import { HARBORS, type Biome } from './harbors';
 import { BOATS, type BoatDefinition, type BoatStyle } from './model';
 
@@ -276,28 +276,6 @@ function makeCoastalLandmark(parent: THREE.Object3D, x: number, z: number, biome
 function makeChannelBanks(parent: THREE.Object3D, plan: LevelPlan): void {
   const harbor = HARBORS[plan.port];
   for (const side of [-1, 1]) {
-    const colors = harbor.biome === 'ice' ? ['#b7eee9', '#8ac7db', '#e4fcf7'] : harbor.biome === 'volcanic' ? ['#68b5b5', '#638fa2', '#dfc9ae'] : harbor.biome === 'reef' ? ['#80e2ce', '#75bad0', '#e7fff0'] : ['#80d4cf', '#70b0c4', '#d7f2e8'];
-    for (const [offset, span, color, height, opacity] of [[0, 8, colors[0], .055, .28], [8, 12, colors[1], .075, .24], [20, 40, colors[2], .045, .09]] as const) {
-      const vertices: number[] = []; const indices: number[] = [];
-      for (let z = -22; z <= 548; z += 6) {
-        const center = channelCenter(plan, z);
-        const ragged = Math.sin(z * .16 + plan.port + offset) * .55 + Math.sin(z * .07 + side * 2) * .4;
-        const edge = center + side * (channelHalfWidth(plan, z) + offset + ragged);
-        vertices.push(edge, height, z, center + side * (channelHalfWidth(plan, z) + offset + span + ragged), height, z);
-        if (z > -22) { const i = (z + 22) / 6 * 2; indices.push(i - 2, i - 1, i, i - 1, i + 1, i); }
-      }
-      const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-      geometry.setIndex(indices); geometry.computeVertexNormals();
-      const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide }));
-      parent.add(mesh);
-    }
-    for (let z = 24; z < 520; z += 18) {
-      const jitter = Math.sin(z * 7.13 + plan.port * 3.1 + side) * 4;
-      const x = channelCenter(plan, z) + side * (channelHalfWidth(plan, z) + 11 + jitter);
-      const crest = new THREE.Mesh(new THREE.TorusGeometry(1.25 + Math.abs(jitter) * .16, .055, 3, 11, Math.PI * (1.05 + Math.abs(jitter) * .08)), new THREE.MeshBasicMaterial({ color: colors[2], transparent: true, opacity: .48, depthWrite: false }));
-      crest.rotation.x = -Math.PI / 2; crest.rotation.z = side * .35 + jitter * .12; crest.position.set(x, .14, z + jitter); parent.add(crest);
-    }
     for (let z = 46; z < 520; z += 76) {
       const x = channelCenter(plan, z) + side * (channelHalfWidth(plan, z) + 27 + (z % 3) * 5);
       if (harbor.biome === 'ice') makeIceberg(parent, x, z + side * 7, 1.8 + (z % 4) * .25);
@@ -325,16 +303,70 @@ function makeIsland(parent: THREE.Object3D, x: number, z: number, scale = 1): vo
 
 function makeHarbour(parent: THREE.Object3D, z: number, destination = false, x = 0, biome: Biome = 'cove', accent = '#e7735a'): void {
   const harbour = new THREE.Group(); harbour.position.set(x, 0, z);
-  if (biome === 'cove' || biome === 'reef') { makeIsland(harbour, -12, 0, 1.1); makeIsland(harbour, 12, 2, .92); }
-  else { makeCoastalLandmark(harbour, -12, 0, biome, accent, 3); makeCoastalLandmark(harbour, 12, 2, biome, accent, 7); }
-  box(harbour, '#aa764d', -7.5, 0.5, 0, 7, 0.68, 3.2);
-  for (let i = 0; i < 5; i++) box(harbour, '#775a46', -10.6 + i * 1.5, 0.13, 0, 0.3, 0.7, 0.3);
+  const shoreColor = biome === 'ice' ? '#d8eeec' : biome === 'volcanic' ? '#806d6c' : biome === 'cliff' ? '#a8ada4' : biome === 'reef' ? '#f4dcaa' : '#edcf98';
+  const topColor = biome === 'ice' ? '#eefaf5' : biome === 'volcanic' ? '#857d76' : biome === 'cliff' ? '#a7bea8' : biome === 'reef' ? '#a6dcb2' : biome === 'marsh' ? '#93ba8b' : '#8fc79a';
+  const land = (lx: number, lz: number, radius: number, seed: number): void => {
+    const shore = cylinder(harbour, shoreColor, lx, .28, lz, radius, .62, 11);
+    shore.scale.z = .72 + seed * .04; shore.rotation.y = seed * .38;
+    const plateau = cylinder(harbour, topColor, lx - .35, .68, lz - .25, radius * .82, .3, 10);
+    plateau.scale.z = .68 + seed * .035; plateau.rotation.y = seed * .36;
+    for (let i = 0; i < 4; i++) {
+      const angle = i * 1.73 + seed;
+      const rx = lx + Math.cos(angle) * radius * .76;
+      const rz = lz + Math.sin(angle) * radius * .53;
+      const stone = new THREE.Mesh(new THREE.DodecahedronGeometry(.7 + i * .13, 0), mat(biome === 'ice' ? '#c8e6eb' : biome === 'volcanic' ? '#675f66' : '#bba990'));
+      stone.position.set(rx, .42, rz); stone.scale.y = .65; harbour.add(stone);
+    }
+  };
+  land(-13, -1, destination ? 13.5 : 11, 1);
+  land(13.2, 2, destination ? 11.5 : 9.4, 2);
+  if (destination) { land(-25, 7, 8.7, 3); land(24, 9, 7.5, 4); }
+  // Keep the lighthouse headland clear. Low trees and rocks frame the sheltered cove.
+  for (const [tx, tz, size] of [[-20, 3, 1], [-25, 8, .72], [20, 7, .78]] as const) {
+    if (!destination && tx === -25) continue;
+    if (tx > 0 && biome !== 'ice' && biome !== 'volcanic' && biome !== 'cliff') {
+      const shrub = new THREE.Mesh(new THREE.DodecahedronGeometry(.85 * size, 0), mat(biome === 'reef' ? '#7fbda1' : '#65a77c'));
+      shrub.position.set(tx, .98, tz); shrub.scale.y = .52; harbour.add(shrub);
+    } else if (biome === 'ice') {
+      const crystal = cone(harbour, '#f2fffa', tx, 1.75, tz, .8 * size, 2.3 * size, 5); crystal.rotation.z = .12;
+    } else if (biome === 'volcanic' || biome === 'cliff') {
+      const crag = new THREE.Mesh(new THREE.DodecahedronGeometry(1.4 * size, 0), mat(biome === 'volcanic' ? '#625c62' : '#9da8a5'));
+      crag.position.set(tx, 1.35, tz); crag.scale.set(.9, 1.2, .8); harbour.add(crag);
+    } else if (biome === 'reef') {
+      for (let i = 0; i < 3; i++) cone(harbour, i % 2 ? '#f5a183' : '#f0d693', tx + i * .48, 1.3 + i * .17, tz + (i % 2) * .4, .37, 1.2, 5);
+    } else {
+      cylinder(harbour, '#8b7058', tx, 1.35, tz, .16 * size, 1.35 * size, 6);
+      cone(harbour, biome === 'pine' ? '#3e806e' : '#65a77c', tx, 2.45 * size, tz, .9 * size, 2.2 * size, 6);
+    }
+  }
+  box(harbour, '#aa764d', -7.1, .68, 0, 8.3, .42, 3.3);
+  for (let i = 0; i < 6; i++) box(harbour, '#775a46', -10.8 + i * 1.5, .23, 0, .3, .7, .3);
   box(harbour, destination ? '#f5a2a2' : '#ffd780', -11.8, 2.4, -1.3, 4.25, 3.1, 3.4);
-  const roof = box(harbour, destination ? '#be6183' : accent, -11.8, 4.22, -1.3, 5, 0.55, 4);
+  const roof = box(harbour, destination ? '#be6183' : accent, -11.8, 4.22, -1.3, 5, .55, 4);
   roof.rotation.z = -0.08;
-  box(harbour, '#fff4d2', -9.55, 2.52, -1.3, 0.12, 1.3, 1.3);
+  box(harbour, '#fff4d2', -9.55, 2.52, -1.3, .12, 1.3, 1.3);
+  for (let i = 0; i < 3; i++) box(harbour, '#8dc9d2', -13.3 + i * 1.5, 2.7, -3.06, .8, .86, .09);
   for (let i = 0; i < 3; i++) box(harbour, ['#f89069', '#9cd8ad', '#b59cdd'][i], -7.1 + i * 0.9, 1.2, 1.4, 0.8, 0.8, 0.8);
+  if (destination) {
+    box(harbour, '#eee0b8', -21, 2.1, 5, 4.7, 2.7, 4);
+    const warehouseRoof = box(harbour, accent, -21, 3.68, 5, 5.3, .43, 4.7); warehouseRoof.rotation.z = .06;
+    for (let i = 0; i < 2; i++) box(harbour, '#75afba', -22.2 + i * 2.3, 2.15, 2.93, 1.1, 1.1, .12);
+    box(harbour, '#f6e2b4', -17.7, .92, -5.4, 7.5, .2, 1.8);
+    for (let i = 0; i < 3; i++) {
+      cylinder(harbour, '#577281', -19.8 + i * 2.1, 1.15, -5.4, .15, .65, 6);
+      box(harbour, ['#ef9d7b', '#e8c779', '#9fd0c0'][i], -17.5 + i * .82, 1.2, 1.5, .72, .72, .72);
+    }
+    for (let i = 0; i < 4; i++) {
+      const bx = i < 2 ? -24 - i * 2.1 : 22 + (i - 2) * 2.2;
+      const breakwater = new THREE.Mesh(new THREE.DodecahedronGeometry(1.25 + i * .12, 0), mat(shoreColor));
+      breakwater.position.set(bx, .32, 2 + i * 2.5); breakwater.scale.y = .58; harbour.add(breakwater);
+    }
+  }
   cylinder(harbour, '#fff7d8', 12.6, 3.05, 1.3, 0.95, 5.3, 8);
+  cylinder(harbour, '#eb786d', 12.6, 2.15, 1.3, .97, .24, 8);
+  cylinder(harbour, '#eb786d', 12.6, 4.23, 1.3, .97, .24, 8);
+  box(harbour, '#507b88', 12.6, 3.13, 2.26, .4, .7, .08);
+  box(harbour, '#507b88', 13.55, 3.52, 1.3, .08, .7, .4);
   cylinder(harbour, '#f26b60', 12.6, 5.83, 1.3, 1.15, 0.42, 8);
   cone(harbour, '#395b74', 12.6, 6.25, 1.3, 1.32, 0.7, 8);
   cylinder(harbour, '#f5cb69', 12.6, 5.44, 1.3, 0.57, 0.34, 8);
@@ -404,6 +436,17 @@ function makeHullFoam(width: number, length: number): THREE.Mesh {
   return foam;
 }
 
+const routeWaterShader = `uniform vec4 uRoute; uniform vec2 uRouteWidth;
+  float offshoreWater(vec2 position) {
+    float z = position.y;
+    float mainBend = sin(z * uRoute.y + uRoute.z) - sin(uRoute.z);
+    float detailBend = sin(z * uRoute.y * 1.9 + uRoute.z * 1.7) - sin(uRoute.z * 1.7);
+    float center = uRoute.w * z + uRoute.x * (mainBend * 0.8 + detailBend * 0.18);
+    float halfWidth = uRouteWidth.x + sin(z * 0.026 + uRouteWidth.y * 0.43) * 1.05 + sin(z * 0.073 + uRouteWidth.y) * 0.45;
+    float distance = max(0.0, abs(position.x - center) - halfWidth);
+    return smoothstep(0.0, 42.0, distance);
+  }`;
+
 export interface Hazard { x: number; z: number; radius: number; kind: HazardKind; mesh: THREE.Group; }
 export interface Patrol { x: number; z: number; baseX: number; baseZ: number; phase: number; heading: number; chase: number; sound: boolean; mesh: THREE.Group; light: THREE.Mesh; ring: THREE.Mesh | null; foam: THREE.Mesh; wake: THREE.Mesh; }
 interface DockParcel { mesh: THREE.Object3D; start: THREE.Vector3; end: THREE.Vector3; launch: number }
@@ -470,18 +513,20 @@ export class World {
     const water = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false,
       uniforms: {
-        uTime: { value: 0 }, uRoughness: { value: 0 }, uDeep: { value: new THREE.Color('#087f94') },
+        uTime: { value: 0 }, uRoute: { value: new THREE.Vector4() }, uRouteWidth: { value: new THREE.Vector2() }, uDeep: { value: new THREE.Color('#087f94') },
         uLight: { value: new THREE.Color('#2ba9b1') }, uFoam: { value: new THREE.Color('#a1e6dc') },
       },
-      vertexShader: `uniform float uTime; uniform float uRoughness; varying vec3 vWater;
+      vertexShader: `uniform float uTime; varying vec3 vWater; varying float vRoughness; ${routeWaterShader}
         void main() {
           vec3 p = position;
+          vec3 world = (modelMatrix * vec4(position, 1.0)).xyz;
+          vRoughness = offshoreWater(world.xz);
           p.z = (sin(p.x * 0.42 + uTime * 1.1) * 0.08 + sin(p.y * 0.25 - uTime * 0.85) * 0.06
-            + sin(p.x * 0.9 + p.y * 0.47 + uTime * 1.55) * 0.035) * (1.0 + uRoughness * 2.2);
-          vWater = (modelMatrix * vec4(position, 1.0)).xyz;
+            + sin(p.x * 0.9 + p.y * 0.47 + uTime * 1.55) * 0.035) * (1.0 + vRoughness * 3.6);
+          vWater = world;
           gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
         }`,
-      fragmentShader: `uniform float uTime; uniform float uRoughness; uniform vec3 uDeep; uniform vec3 uLight; uniform vec3 uFoam; varying vec3 vWater;
+      fragmentShader: `uniform float uTime; uniform vec3 uDeep; uniform vec3 uLight; uniform vec3 uFoam; varying vec3 vWater; varying float vRoughness;
         float hash21(vec2 p) {
           return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
         }
@@ -505,13 +550,16 @@ export class World {
             sin(p.x * 0.17 - uTime * 0.3) * 1.8);
           float swell = sin(folded.x * 0.27 + folded.y * 0.15 - uTime * 0.74);
           float crossing = sin(folded.y * 0.31 - folded.x * 0.24 + uTime * 0.98);
-          float shade = clamp(0.49 + swell * crossing * 0.22 + swell * 0.065
+          float shade = clamp(0.49 + swell * crossing * (0.22 + vRoughness * 0.14) + swell * 0.065
             + sin(folded.x * 0.58 + cos(folded.y * 0.41 - uTime) * 1.4) * 0.035, 0.0, 1.0);
           float ripples = localRipple(p, 13.0, 0.13, 0.0)
             + localRipple(p + vec2(4.1, 6.7), 21.0, 0.09, 19.0);
           float glint = smoothstep(0.72, 0.97, swell * crossing) * 0.06;
           vec3 color = mix(uDeep, uLight, shade);
-          color = mix(color, uFoam, min(0.44, ripples * 0.24 + glint + uRoughness * smoothstep(0.44, 0.8, swell * crossing) * 0.28));
+          color = mix(color, uDeep, vRoughness * 0.16);
+          float breakOne = smoothstep(0.42, 0.83, sin(p.x * 0.39 + p.y * 0.23 - uTime * 1.5) * crossing);
+          float breakTwo = smoothstep(0.58, 0.91, sin(p.y * 0.37 - p.x * 0.21 + uTime * 1.15) * swell);
+          color = mix(color, uFoam, min(0.5, ripples * 0.24 + glint + vRoughness * (breakOne * 0.25 + breakTwo * 0.18)));
           gl_FragColor = vec4(color, 0.82);
           #include <colorspace_fragment>
         }`,
@@ -611,6 +659,9 @@ export class World {
     this.scene.fog = new THREE.Fog(color, plan.weather === 'fog' ? 35 : 75, plan.weather === 'fog' ? 105 : 150);
     this.renderer.setClearColor(color);
     const water = this.ocean.material as THREE.ShaderMaterial;
+    const harbor = HARBORS[plan.port];
+    water.uniforms.uRoute.value.set(harbor.bend, harbor.frequency, harbor.phase, harborCourseSlope(plan.port));
+    water.uniforms.uRouteWidth.value.set(plan.channelWidth, plan.port);
     water.uniforms.uDeep.value.set(plan.night ? '#073e64' : plan.weather === 'storm' ? '#426c7e' : deep);
     water.uniforms.uLight.value.set(plan.night ? '#246f91' : plan.weather === 'storm' ? '#779ea8' : light);
   }
@@ -828,15 +879,14 @@ export class World {
     const localX = x - this.ocean.position.x;
     return -0.04 + (Math.sin(localX * 0.42 + this.elapsed * 1.1) * 0.08
       + Math.sin((260 - z) * 0.25 - this.elapsed * 0.85) * 0.06
-      + Math.sin(localX * 0.9 + (260 - z) * 0.47 + this.elapsed * 1.55) * 0.035) * (1 + this.seaRoughness * 2.2);
+      + Math.sin(localX * 0.9 + (260 - z) * 0.47 + this.elapsed * 1.55) * 0.035) * (1 + offshoreWaveStrength(this.plan, x, z) * 3.6);
   }
 
   update(dt: number, running: boolean, x: number, z: number, heat: number, boatSpeed: number, vx = 0, vz = 0, target: { x: number; z: number } | null = null): void {
     this.elapsed += dt;
     (this.ocean.material as THREE.ShaderMaterial).uniforms.uTime.value = this.elapsed;
     const roughnessTarget = running && !this.inYard ? offshoreState(this.plan, x, z).swell : 0;
-    this.seaRoughness += (roughnessTarget - this.seaRoughness) * Math.min(1, dt * 1.6);
-    (this.ocean.material as THREE.ShaderMaterial).uniforms.uRoughness.value = this.seaRoughness;
+    this.seaRoughness += (roughnessTarget - this.seaRoughness) * Math.min(1, dt * 2.2);
     if (this.docking) {
       this.docking.time += dt;
       const progress = Math.min(1, this.docking.time / this.docking.approach);
@@ -857,12 +907,12 @@ export class World {
       this.heading += difference * Math.min(1, dt * 3.2);
     }
     const surface = this.waterHeight(x, z);
-    const bob = Math.sin(this.elapsed * 2.15 + z * 0.15) * 0.04;
+    const bob = Math.sin(this.elapsed * (2.15 + this.seaRoughness * .65) + z * 0.15) * (0.04 + this.seaRoughness * .19);
     this.boat.position.set(x, surface - 0.94 + bob, z);
     this.boat.rotation.set(
-      Math.sin(this.elapsed * 1.75 + z * 0.08) * (0.038 + this.seaRoughness * .09) + vz * 0.003,
-      this.heading,
-      Math.sin(this.elapsed * 2.1 + x * 0.3) * (0.045 + this.seaRoughness * .11) - vx * 0.007 + (this.damageTime > 0 ? Math.sin(this.elapsed * 46) * this.damageTime * 0.17 : 0),
+      Math.sin(this.elapsed * 1.75 + z * 0.08) * (0.038 + this.seaRoughness * .2) + vz * 0.003,
+      this.heading + Math.sin(this.elapsed * 1.9 + z * .11) * this.seaRoughness * .075,
+      Math.sin(this.elapsed * 2.1 + x * 0.3) * (0.045 + this.seaRoughness * .22) - vx * 0.007 + (this.damageTime > 0 ? Math.sin(this.elapsed * 46) * this.damageTime * 0.17 : 0),
     );
     if (this.docking) {
       this.boat.updateMatrixWorld(true);

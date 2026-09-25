@@ -17,11 +17,15 @@ const hash = (seed: number): number => {
 };
 
 /** The centreline and coast shape belong to the harbour, so repeat visits feel familiar. */
+export function harborCourseSlope(port: number): number {
+  const rank = (port * 7 + 16) % HARBORS.length;
+  return rank < 12 ? -.215 - (11 - rank) * .02 : .215 + (rank - 12) * .02;
+}
 export function channelCenter(plan: LevelPlan, z: number): number {
   const harbor = HARBORS[plan.port];
   const main = Math.sin(z * harbor.frequency + harbor.phase) - Math.sin(harbor.phase);
   const detail = Math.sin(z * (harbor.frequency * 1.9) + harbor.phase * 1.7) - Math.sin(harbor.phase * 1.7);
-  return harbor.bend * (main * .8 + detail * .18);
+  return harborCourseSlope(plan.port) * z + harbor.bend * (main * .8 + detail * .18);
 }
 export function channelHalfWidth(plan: LevelPlan, z: number): number {
   return plan.channelWidth + Math.sin(z * .026 + plan.port * .43) * 1.05 + Math.sin(z * .073 + plan.port) * .45;
@@ -34,7 +38,19 @@ export function offshoreState(plan: LevelPlan, x: number, z: number): { distance
   const swell = Math.min(1, distance / 28);
   return { distance, side, zone, push: -side * Math.min(10, distance * .2 + Math.max(0, distance - 8) * .12), drag: Math.min(.5, distance * .012), swell };
 }
+export function offshoreWaveStrength(plan: LevelPlan, x: number, z: number): number {
+  const t = Math.min(1, offshoreState(plan, x, z).distance / 42);
+  return t * t * (3 - 2 * t);
+}
+export function roughWaterPush(plan: LevelPlan, x: number, z: number, time: number): { x: number; z: number } {
+  const swell = offshoreState(plan, x, z).swell;
+  return { x: swell * (Math.sin(time * 2.7 + z * .16) * 2.7 + Math.sin(time * 1.4 + x * .12) * 1.5),
+    z: swell * (Math.cos(time * 2.25 + x * .18) * 1.8) };
+}
 export function destinationX(plan: LevelPlan): number { return channelCenter(plan, 532) - 1.8; }
+export function canDock(plan: LevelPlan, x: number, z: number): boolean {
+  return z >= ROUTE_END && Math.abs(x - destinationX(plan)) <= 8;
+}
 
 export function levelPlan(number: number, port: number): LevelPlan {
   const level = Number.isFinite(number) ? Math.max(1, Math.floor(number)) : 1;

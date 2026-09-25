@@ -47,7 +47,7 @@ On phones, the scene fills the viewport and the current task sits in a scrollabl
 
 ## Sailing motion
 
-During a run, open screen space steers directly to the tapped water point; dragging moves the target, and release preserves a little boat inertia. The camera follows the boat across open water. Beyond the marked route, pale water gives way to whitecaps and breakers; drag, swell and an inward current build gradually, and a persistent warning appears before breakers damage the hull. Sparse coastal features change by harbor: reefs and shallows, cliff rocks, volcanic stacks or icebergs. A brass compass at lower left points toward the destination, with distance beside it. Patrol boats travel through varied turns and loops; their visible cones follow their bows. A successful run ends with a close view of the boat docking and cargo crossing onto the pier before the result appears.
+During a run, open screen space steers directly to the tapped water point; dragging moves the target, and release preserves a little boat inertia. The camera follows the boat across open water. The sea has no hard color band: wave height, whitecaps, color depth and motion grow smoothly offshore. Drag, swell, inward current and buffeting make steering progressively harder, and a persistent warning appears before breakers damage the hull. Sparse coastal features change by harbor: reefs and shallows, cliff rocks, volcanic stacks or icebergs. Each harbor route has its own compass bearing; the brass compass marks the actual port on its rim and shows its name, direction and distance. Docking requires reaching that port rather than merely crossing the route end. Patrol boats travel through varied turns and loops; their visible cones follow their bows. A successful run ends with a close view of the boat docking and cargo crossing onto the pier before the result appears.
 
 ## Voyage progression
 
@@ -84,3 +84,7 @@ The night light switch changes both the visible area around the boat and patrol 
 ## Boat silhouettes
 
 Hull profiles use shaped chines and gunwales instead of a flat slab. Deck equipment reinforces each boat's role: open benches and oars on the dinghy, a windscreen and twin motors on the speedboat, fishing gear on the trawler, a covered cabin on the cruiser, stacked containers on the freighter, two separate hulls on the catamaran, and a cottage roof on the houseboat. The backup sailboat uses an open cockpit, mast, boom, rigging, and angled, gently billowed triangular sails with a warm patch of color. Idle shipyard models show the boat without delivery crates so its shape is legible.
+
+## Harbor scenery
+
+Ports sit on layered low-poly shorelines with sandy or rocky rims, terrain colors suited to their biome, planted headlands, dock equipment and additional destination buildings. The lighthouse stands on a clear headland without palm fronds around its base. Destination coves have larger adjoining landforms and breakwaters so buildings read as part of a harbor rather than floating in open water.
