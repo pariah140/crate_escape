@@ -9,7 +9,7 @@ import { heardBySoundPatrol, inVisionCone, sightProfile } from './patrols';
 import {
   BOATS, PORTS, HARBORS, SHAPE_NAMES, canFitAll, canPlace, jobById, jobsForPort,
   loadSave, occupiedCells, persist, rotatedCells, usableCells, isBlocked, boatUpgrade, repairCost, rareChance, specialOfferFor,
-  harborRequirements, refreshHarborUnlocks, openHarbor, recordHarborDelivery, HARBOR_GATES, estimateCargoPay, voyageReceipt, boatTraits, impactDamage, conditionHandling,
+  harborRequirements, refreshHarborUnlocks, openHarbor, recordHarborDelivery, HARBOR_GATES, estimateCargoPay, voyageReceipt, boatTraits, impactDamage, conditionHandling, charterChallenge, completesChallenge,
   BACKUP_BOAT_INDEX, MIN_SEAWORTHY_CONDITION,
   type Job, type Phase, type Piece,
 } from './model';
@@ -58,7 +58,7 @@ let hover: { x: number; y: number } | null = null;
 let dragPiece: string | null = null;
 let dragMoved = false;
 let run: RunState | null = null;
-let result: { won: boolean; reason: string; payout: number; base: number; bonus: number; adjustment: number; service: number; rep: number } | null = null;
+let result: { won: boolean; reason: string; payout: number; base: number; bonus: number; challengeBonus: number; adjustment: number; service: number; rep: number } | null = null;
 let toastTimer = 0;
 let lastHud = 0;
 let audioContext: AudioContext | null = null;
@@ -135,6 +135,7 @@ function renderBoard(): void {
     ${headerStep('01 / PICK A DELIVERY', 'The job board', `A little cargo. A little chaos. Sailing from ${PORTS[save.port]}.`)}
     <div class="port-strip"><div class="port-illustration" aria-hidden="true">⚓</div><div><span class="eyebrow">CURRENT PORT</span><strong>${PORTS[save.port]}</strong></div><button class="port-map-link" type="button" data-action="map">View map →</button></div>
     <div class="level-strip"><span>VOYAGE ${save.level} · ${HARBORS[save.port].name.toUpperCase()}</span><strong>${plan.night ? '☾ NIGHT · ' : ''}${plan.weather.toUpperCase()} SEAS</strong><small>${plan.hazards.length} obstacles · ${plan.currents.length} currents · ${plan.patrols.length} patrols</small></div>
+    <div class="challenge-ribbon"><strong>★ CHARTER CHALLENGE · ${charterChallenge(save).name}</strong><span>${charterChallenge(save).description} Bonus up to 8% of cargo pay.</span></div>
     <div class="ability-ribbon"><strong>✦ ${boat().ability}</strong><span>${boat().abilityDetail}</span></div>
     <div class="capacity-strip" aria-label="Cargo hold capacity">
       <div class="capacity-main"><div><span class="eyebrow">${boat().name.toUpperCase()} · ${holdWidth()} × ${holdHeight()} HOLD</span><strong>${usedCells} / ${totalCells} cells booked</strong></div><span class="capacity-left">${remainingCells} left</span></div>
@@ -218,7 +219,7 @@ function renderResult(): void {
     <div class="result-icon" aria-hidden="true">${icon}</div><span class="eyebrow">${result.won ? 'DELIVERY COMPLETE' : 'RUN ENDED'}</span>
     <h1>${result.won ? 'Made it in one piece!' : result.reason === 'caught' ? 'Caught by the Patrol!' : 'The boat took a bath.'}</h1>
     <p>${result.won ? 'The cargo is ashore and nobody asked any questions.' : 'The cargo is gone. Your boat is back at the yard for repairs; its upgrades are safe.'}</p>
-    ${result.won ? `<div class="receipt"><div><span>Cargo pay</span><strong>${money(result.base)}</strong></div><div><span>Perfect pack</span><strong>+${money(result.bonus)}</strong></div>${result.adjustment ? `<div><span>Cargo wear / delay</span><strong>−${money(result.adjustment)}</strong></div>` : ''}<div><span>Harbour service · 10%</span><strong>−${money(result.service)}</strong></div><div class="receipt-total"><span>Cash earned</span><strong>${money(result.payout)}</strong></div></div><div class="rep-note">★ +${result.rep} reputation · charter progress saved</div>` : `<div class="failure-note">No payout this time · -${Math.abs(result.rep)} reputation</div>`}
+    ${result.won ? `<div class="receipt"><div><span>Cargo pay</span><strong>${money(result.base)}</strong></div><div><span>Perfect pack</span><strong>+${money(result.bonus)}</strong></div><div><span>Charter challenge</span><strong>+${money(result.challengeBonus)}</strong></div>${result.adjustment ? `<div><span>Cargo wear / delay</span><strong>−${money(result.adjustment)}</strong></div>` : ''}<div><span>Harbour service · 10%</span><strong>−${money(result.service)}</strong></div><div class="receipt-total"><span>Cash earned</span><strong>${money(result.payout)}</strong></div></div><div class="rep-note">★ +${result.rep} reputation · charter progress saved</div>` : `<div class="failure-note">No payout this time · -${Math.abs(result.rep)} reputation</div>`}
     <button class="primary-button" type="button" data-action="next">${result.won ? 'Next delivery' : 'Try again'} <span>→</span></button>
     ${result.won ? '<button class="secondary-button full share-button" type="button" data-action="share">Share this run ↗</button>' : ''}
     <button class="text-button" type="button" data-action="yard">Visit the shipyard ↗</button>
@@ -462,8 +463,10 @@ function updateHud(): void {
 function endRun(won: boolean, reason: string): void {
   if (!run || phase !== 'run') return;
   const full = pieces.reduce((sum, piece) => sum + occupiedCells(piece).length, 0) === holdCapacity();
-  const receipt = won ? voyageReceipt(save.port, jobs, boat(), full, run.collisions, run.elapsed > run.deadline) : { base: 0, bonus: 0, adjustment: 0, service: 0, payout: 0 };
-  const { base, bonus, adjustment, service, payout } = receipt;
+  const challenge = charterChallenge(save);
+  const challengeRate = won && completesChallenge(challenge, jobs, boat(), run.collisions) ? challenge.rate : 0;
+  const receipt = won ? voyageReceipt(save.port, jobs, boat(), full, run.collisions, run.elapsed > run.deadline, challengeRate) : { base: 0, bonus: 0, challengeBonus: 0, adjustment: 0, service: 0, payout: 0 };
+  const { base, bonus, challengeBonus, adjustment, service, payout } = receipt;
   const rep = won ? 3 + jobs.length + (run.collisions === 0 ? 2 : 0) : -2;
   save.boatCondition[save.boat] = save.boat === BACKUP_BOAT_INDEX ? 100 : Math.max(30, Math.round(run.hull / run.maxHull * 100));
   save.cash += payout; save.reputation = Math.max(0, save.reputation + rep); save.runs++;
@@ -472,7 +475,7 @@ function endRun(won: boolean, reason: string): void {
   if (backupNeeded) { save.boat = BACKUP_BOAT_INDEX; world.setBoat(boat()); }
   if (won) save.level += 1;
   refreshHarborUnlocks(save);
-  result = { won, reason, payout, base, bonus, adjustment, service, rep };
+  result = { won, reason, payout, base, bonus, challengeBonus, adjustment, service, rep };
   run = null; phase = 'result'; saveProgress(); render();
   beep(won ? 660 : 180, 0.25, won ? 'triangle' : 'sawtooth');
   if (won) window.setTimeout(() => beep(880, 0.22, 'triangle'), 110);

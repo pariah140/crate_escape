@@ -231,6 +231,20 @@ export function specialOfferFor(save: SaveData): Job | null {
 export function jobsForPort(port: number, special: Job | null = null): Job[] { return [...(portJobs[port] || coveJobs), ...(special ? [special] : [])]; }
 export function jobById(id: string): Job | undefined { return [...portJobs.flat(), ...specialJobs.flat()].find(job => job.id === id); }
 export function cargoCells(jobs: Job[]): number { return jobs.reduce((sum, job) => sum + job.shapes.reduce((cells, shape) => cells + SHAPES[shape].length, 0), 0); }
+export interface CharterChallenge { name: string; description: string; rate: number; kind: 'clean' | 'mixed' | 'loaded' }
+const CHARTER_CHALLENGES: CharterChallenge[] = [
+  { name: 'Clean wake', description: 'Dock without hitting an obstacle.', rate: .08, kind: 'clean' },
+  { name: 'Mixed manifest', description: 'Deliver at least two cargo types together.', rate: .06, kind: 'mixed' },
+  { name: 'Loaded crossing', description: 'Fill at least 60% of your hold.', rate: .07, kind: 'loaded' },
+];
+export function charterChallenge(save: SaveData): CharterChallenge {
+  return save.boat === BACKUP_BOAT_INDEX ? CHARTER_CHALLENGES[0] : CHARTER_CHALLENGES[(save.offerCycle + save.port) % CHARTER_CHALLENGES.length];
+}
+export function completesChallenge(challenge: CharterChallenge, jobs: Job[], craft: BoatDefinition, collisions: number): boolean {
+  if (challenge.kind === 'clean') return collisions === 0;
+  if (challenge.kind === 'mixed') return new Set(jobs.map(job => job.kind)).size >= 2;
+  return cargoCells(jobs) >= usableCells(craft) * .6;
+}
 export function estimateCargoPay(port: number, jobs: Job[], craft: BoatDefinition): number {
   if (!jobs.length) return 0;
   const loaded = Math.min(usableCells(craft), cargoCells(jobs));
@@ -241,17 +255,18 @@ export function estimateCargoPay(port: number, jobs: Job[], craft: BoatDefinitio
   const bulk = craft.style === 'freighter' && loaded >= 30 ? 1.08 : craft.style === 'barge' && loaded >= 40 ? 1.12 : 1;
   return Math.round((150 + port * 58) * (.18 + .9 * fill) * (1 + (heat - 1) * .025) * rare * bulk);
 }
-export interface VoyageReceipt { base: number; bonus: number; adjustment: number; service: number; payout: number }
-export function voyageReceipt(port: number, jobs: Job[], craft: BoatDefinition, fullHold: boolean, collisions: number, late: boolean): VoyageReceipt {
+export interface VoyageReceipt { base: number; bonus: number; challengeBonus: number; adjustment: number; service: number; payout: number }
+export function voyageReceipt(port: number, jobs: Job[], craft: BoatDefinition, fullHold: boolean, collisions: number, late: boolean, challengeRate = 0): VoyageReceipt {
   const base = estimateCargoPay(port, jobs, craft);
   const bonus = fullHold ? Math.round(base * .1) : 0;
-  let gross = base + bonus;
+  const challengeBonus = Math.round(base * Math.min(.08, Math.max(0, challengeRate)));
+  let gross = base + bonus + challengeBonus;
   if (jobs.some(job => job.kind === 'fragile')) gross -= Math.round(base * Math.min(collisions * (craft.style === 'cruiser' ? .1 : .2), .8));
   if (late && jobs.some(job => job.kind === 'perishable')) gross = Math.round(gross * .7);
   gross = Math.max(0, gross);
-  const adjustment = base + bonus - gross;
+  const adjustment = base + bonus + challengeBonus - gross;
   const service = Math.round(gross * .1);
-  return { base, bonus, adjustment, service, payout: gross - service };
+  return { base, bonus, challengeBonus, adjustment, service, payout: gross - service };
 }
 
 export function rotatedCells(shape: Shape, rotation: number): Cell[] {

@@ -75,7 +75,7 @@ Each boat has a different low poly hull silhouette, cabin equipment, cargo footp
 
 ## Marketplace and harbor chart
 
-The marketplace is a full paper catalog ordered by price, with every boat's own silhouette, hold footprint, steering, hull and specialty side by side. The shipyard lists only owned boats and links to the catalog. The harbor chart is an illustrated 25-stop atlas: open stops use color, locked stops use dashed borders, each stop shows a miniature route and the exact unlock requirement and current gap. New harbors open in sequence after local deliveries, two cargo types, a clean run, enough hold space and a one-time outfitting fee. Open harbours stay available after boat switching. Existing saves keep their previously opened harbours.
+The marketplace is a full paper catalog ordered by price, with every boat's own silhouette, hold footprint, steering, hull and specialty side by side. The shipyard lists only owned boats and links to the catalog. The harbor chart is an illustrated 25-stop atlas: open stops use color, locked stops use dashed borders, each stop shows a miniature route and the exact unlock requirement and current gap. New harbors open in sequence after local deliveries, two cargo types, a clean run, enough hold space and a one-time outfitting fee. Open harbours stay available after boat switching. Existing saves keep their previously opened harbours. The job board offers a rotating, optional charter challenge after each successful voyage; its bonus is capped and shown separately on the receipt.
 
 ## Night voyages and dockyard inspection
 

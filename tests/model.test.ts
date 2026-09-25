@@ -172,3 +172,19 @@ test('each boat has a capacity, price, handling tradeoff and a working specialty
   assert.ok(voyageReceipt(3, fragile, BOATS[3], false, 2, false).payout > voyageReceipt(3, fragile, BOATS[7], false, 2, false).payout);
   assert.ok(estimateCargoPay(24, jobsForPort(24), BOATS[9]) < 2400, 'endless voyages do not multiply cash without bound');
 });
+
+test('charter challenges rotate after a win and pay a bounded bonus', async () => {
+  const { defaultSave, charterChallenge, completesChallenge, BOATS, voyageReceipt, estimateCargoPay, BACKUP_BOAT_INDEX } = await import('../src/model');
+  const save = defaultSave();
+  const first = charterChallenge(save);
+  save.offerCycle++;
+  const second = charterChallenge(save);
+  assert.notEqual(first.kind, second.kind);
+  const jobs = jobsForPort(0).slice(0, 2);
+  assert.equal(completesChallenge(first, jobs, BOATS[0], 0), true);
+  assert.equal(completesChallenge(first, jobs, BOATS[0], 1), false);
+  const receipt = voyageReceipt(0, jobs, BOATS[0], false, 0, false, 1);
+  assert.ok(receipt.challengeBonus <= Math.round(estimateCargoPay(0, jobs, BOATS[0]) * .08));
+  save.boat = BACKUP_BOAT_INDEX;
+  assert.equal(charterChallenge(save).kind, 'clean', 'recovery boat receives a feasible challenge');
+});
