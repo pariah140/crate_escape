@@ -4,6 +4,7 @@ import { Share } from '@capacitor/share';
 import { World } from './world';
 import { advanceMotion } from './piloting';
 import { canDock, channelCenter, currentPush, destinationX, destinationZ, levelPlan, offshoreState, roughWaterPush, weatherPush, type LevelPlan } from './levels';
+import { screenArrow } from './navigation';
 import { heardBySoundPatrol, inVisionCone, sightProfile } from './patrols';
 import {
   BOATS, PORTS, HARBORS, SHAPE_NAMES, canFitAll, canPlace, jobById, jobsForPort,
@@ -200,7 +201,7 @@ function renderRun(): void {
     <div class="run-top"><div class="run-stat"><span>ROUTE</span><strong id="route-progress">0%</strong><div class="meter"><i id="route-fill"></i></div></div><div class="run-stat"><span>HULL</span><strong id="hull-number">100%</strong><div class="meter"><i id="hull-fill"></i></div></div><div class="run-stat heat-stat"><span>HEAT</span><strong id="heat-number">LOW</strong><div class="meter"><i id="heat-fill"></i></div></div></div>
     <div class="voyage-tag">VOYAGE ${currentPlan.number} · ${HARBORS[currentPlan.port].name.toUpperCase()} · ${currentPlan.night ? 'NIGHT · ' : ''}${currentPlan.weather.toUpperCase()}</div>
     <div id="sea-warning" class="sea-warning" role="status" aria-live="polite"></div>
-    <div id="port-compass" class="port-compass" role="img" aria-label="Boat heading north; port bearing north"><div class="compass-face"><span class="compass-n">N</span><div id="compass-needle" class="compass-needle">▲</div><span id="compass-port" class="compass-harbor">⚓</span></div><div class="compass-copy"><span id="heading-label" class="heading-label">▲ HEADING N</span><strong>${escapeHtml(HARBORS[currentPlan.port].name.toUpperCase())}</strong><span id="port-distance">⚓ N · ${Math.round(currentPlan.routeEnd)} m</span></div></div>
+    <div id="port-compass" class="port-compass" role="img" aria-label="View compass for boat and destination"><div class="compass-face" aria-hidden="true"><span id="compass-north" class="compass-n">N</span><span id="compass-port" class="compass-port-marker"></span><span id="compass-needle" class="compass-boat-marker"></span><span class="compass-hub"></span></div><div class="compass-copy"><span class="compass-eyebrow">VIEW COMPASS</span><span class="heading-label">BOAT <b id="heading-arrow" class="compass-arrow">↑</b></span><span class="port-label">PORT <b id="port-arrow" class="compass-arrow">↑</b><small id="port-distance">${Math.round(currentPlan.routeEnd)} m</small></span><strong>${escapeHtml(HARBORS[currentPlan.port].name.toUpperCase())}</strong></div></div>
     <div class="engine-controls"><div id="engine-status" class="engine-status">ENGINE IDLE</div>${currentPlan.night ? `<button id="light-toggle" class="light-toggle" type="button" data-action="toggle-lights" aria-pressed="${run?.lightsOn ? 'true' : 'false'}" aria-label="Toggle boat lights">☼ LIGHTS ON</button>` : ''}<button class="cut-engine" type="button" data-action="cut-engine" aria-label="Cut engine and coast">✦ CUT ENGINE</button></div>
     <div class="run-bottom"><div class="run-instruction"><strong id="run-instruction-title">DRAG TO PILOT</strong><span id="run-instruction-detail">Tap a spot or drag · release to coast</span></div><div id="run-timer" class="run-timer">00:00</div></div>
     ${run?.tutorialOpen ? `<div class="sound-tutorial"><div class="sound-card"><span class="eyebrow">NEW PATROL · ACOUSTIC LISTENING</span><h2>Quiet waters, loud engines.</h2><div class="sound-demo" aria-hidden="true"><span class="demo-boat">🚤</span><span class="demo-wave wave-one"></span><span class="demo-wave wave-two"></span><span class="demo-patrol">◉</span></div><p>Build speed before its listening ring. Then release the drag or tap target to cut the engine and coast silently through. You can steer again once clear.</p><button class="primary-button full" type="button" data-action="dismiss-sound-tutorial">Got it · set sail →</button></div></div>` : ''}
@@ -414,8 +415,12 @@ function updateHud(): void {
   const points = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
   const direction = points[((Math.round(portBearing / (Math.PI / 8)) % 16) + 16) % 16];
   const heading = points[((Math.round(run.heading / (Math.PI / 8)) % 16) + 16) % 16];
-  set('heading-label', `▲ HEADING ${heading}`);
-  set('port-distance', `⚓ ${direction} · ${Math.round(Math.hypot(portDx, portDz))} m`);
+  const boatViewBearing = world.screenBearing(Math.sin(run.heading), Math.cos(run.heading));
+  const portViewBearing = world.screenBearing(portDx, portDz);
+  const northViewBearing = world.screenBearing(0, 1);
+  set('heading-arrow', screenArrow(boatViewBearing));
+  set('port-arrow', screenArrow(portViewBearing));
+  set('port-distance', `${Math.round(Math.hypot(portDx, portDz))} m`);
   set('engine-status', run.engineOn ? 'ENGINE ON · PATROLS CAN HEAR' : 'ENGINE CUT · COASTING');
   const seaWarning = document.getElementById('sea-warning');
   if (seaWarning) {
@@ -428,10 +433,12 @@ function updateHud(): void {
   const darkness = document.getElementById('night-visibility');
   if (darkness) darkness.className = `night-visibility ${run.lightsOn ? 'lights-on' : 'lights-off'}`;
   const needle = document.getElementById('compass-needle');
-  if (needle) needle.style.transform = `translate(-50%, -50%) rotate(${run.heading}rad)`;
+  if (needle) needle.style.transform = `translate(-50%, -50%) rotate(${boatViewBearing}rad)`;
   const portMark = document.getElementById('compass-port');
-  if (portMark) { portMark.style.setProperty('--port-x', `${Math.sin(portBearing) * 17}px`); portMark.style.setProperty('--port-y', `${-Math.cos(portBearing) * 17}px`); }
-  document.getElementById('port-compass')?.setAttribute('aria-label', `Boat heading ${heading}. ${HARBORS[currentPlan.port].name} lies ${direction}, ${Math.round(Math.hypot(portDx, portDz))} metres away`);
+  if (portMark) portMark.style.transform = `translate(-50%, -50%) rotate(${portViewBearing}rad) translateY(-22px)`;
+  const northMark = document.getElementById('compass-north');
+  if (northMark) { northMark.style.setProperty('--north-x', `${Math.sin(northViewBearing) * 29}px`); northMark.style.setProperty('--north-y', `${-Math.cos(northViewBearing) * 29}px`); }
+  document.getElementById('port-compass')?.setAttribute('aria-label', `View compass: boat points ${screenArrow(boatViewBearing)} on screen, geographic heading ${heading}. ${HARBORS[currentPlan.port].name} is ${screenArrow(portViewBearing)} on screen, ${Math.round(Math.hypot(portDx, portDz))} metres away, geographic bearing ${direction}.`);
 }
 
 function endRun(won: boolean, reason: string): void {

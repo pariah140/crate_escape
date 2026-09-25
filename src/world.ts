@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { patrolPose } from './patrols';
 import { channelCenter, channelHalfWidth, destinationX, destinationZ, harborCourseSlope, levelPlan, offshoreState, offshoreWaveStrength, type HazardKind, type LevelPlan } from './levels';
+import { screenBearing } from './navigation';
 import { HARBORS, type Biome } from './harbors';
 import { BOATS, type BoatDefinition, type BoatStyle } from './model';
 
@@ -850,6 +851,12 @@ export class World {
     this.raycaster.setFromCamera(ndc, this.camera);
     const hit = this.raycaster.ray.intersectPlane(this.waterPlane, new THREE.Vector3());
     return hit ? { x: hit.x, z: hit.z } : { x: this.boat.position.x, z: this.boat.position.z };
+  }
+
+  screenBearing(dx: number, dz: number): number {
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+    return screenBearing(dx, dz, right.x, right.z, up.x, up.z);
   }
 
   triggerDamage(): void {
