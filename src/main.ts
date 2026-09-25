@@ -3,7 +3,7 @@ import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Share } from '@capacitor/share';
 import { World } from './world';
 import { advanceMotion } from './piloting';
-import { channelCenter, clampToChannel, currentPush, destinationX, levelPlan, ROUTE_END, weatherPush, type LevelPlan } from './levels';
+import { channelCenter, currentPush, destinationX, levelPlan, offshoreState, ROUTE_END, weatherPush, type LevelPlan } from './levels';
 import { heardBySoundPatrol, inVisionCone, sightProfile } from './patrols';
 import {
   BOATS, PORTS, HARBORS, SHAPE_NAMES, canFitAll, canPlace, jobById, jobsForPort,
@@ -45,7 +45,7 @@ interface RunState {
   pointerStartX: number; pointerStartY: number; pointerDownAt: number; pointerMoved: boolean;
   dragOriginX: number; dragOriginZ: number;
   tapTarget: { x: number; z: number } | null; deadline: number; patrolHeat: number; hotCargo: boolean; ending: boolean;
-  heading: number; engineOn: boolean; lightsOn: boolean; tutorialOpen: boolean; tutorialPending: boolean; soundExposure: number;
+  heading: number; engineOn: boolean; lightsOn: boolean; tutorialOpen: boolean; tutorialPending: boolean; soundExposure: number; offshoreTime: number;
 }
 
 let phase: Phase = 'board';
@@ -199,6 +199,7 @@ function renderRun(): void {
     ${currentPlan.night ? `<div id="night-visibility" class="night-visibility ${run?.lightsOn ? 'lights-on' : 'lights-off'}" aria-hidden="true"></div>` : ''}
     <div class="run-top"><div class="run-stat"><span>ROUTE</span><strong id="route-progress">0%</strong><div class="meter"><i id="route-fill"></i></div></div><div class="run-stat"><span>HULL</span><strong id="hull-number">100%</strong><div class="meter"><i id="hull-fill"></i></div></div><div class="run-stat heat-stat"><span>HEAT</span><strong id="heat-number">LOW</strong><div class="meter"><i id="heat-fill"></i></div></div></div>
     <div class="voyage-tag">VOYAGE ${currentPlan.number} · ${HARBORS[currentPlan.port].name.toUpperCase()} · ${currentPlan.night ? 'NIGHT · ' : ''}${currentPlan.weather.toUpperCase()}</div>
+    <div id="sea-warning" class="sea-warning" role="status" aria-live="polite"></div>
     <div class="port-compass" role="img" aria-label="Compass pointing toward the destination port"><div class="compass-face"><span class="compass-n">N</span><div id="compass-needle" class="compass-needle">➤</div><span class="compass-harbor">⚓</span></div><div class="compass-copy"><strong>TO PORT</strong><span id="port-distance">520 m</span></div></div>
     <div class="engine-controls"><div id="engine-status" class="engine-status">ENGINE IDLE</div>${currentPlan.night ? `<button id="light-toggle" class="light-toggle" type="button" data-action="toggle-lights" aria-pressed="${run?.lightsOn ? 'true' : 'false'}" aria-label="Toggle boat lights">☼ LIGHTS ON</button>` : ''}<button class="cut-engine" type="button" data-action="cut-engine" aria-label="Cut engine and coast">✦ CUT ENGINE</button></div>
     <div class="run-bottom"><div class="run-instruction"><strong id="run-instruction-title">DRAG TO PILOT</strong><span id="run-instruction-detail">Tap a spot or drag · release to coast</span></div><div id="run-timer" class="run-timer">00:00</div></div>
@@ -388,7 +389,7 @@ function beginRun(): void {
   const maxHull = boat().hull + boatUpgrade(save).hull * 15;
   const patrolHeat = jobs.reduce((sum, job) => sum + job.heat, 0);
   const hotCargo = jobs.some(job => job.kind === 'hot');
-  run = { x: 0, z: 0, vx: 0, vz: 0, speed: 0, hull: maxHull * (save.boatCondition[save.boat] ?? 100) / 100, maxHull, heat: Math.min(65, patrolHeat * 4 + (hotCargo ? 8 : 0)), contact: 0, damageCooldown: 0, collisions: 0, elapsed: 0, holding: false, pointer: null, pointerX: 0, pointerY: 0, pointerStartX: 0, pointerStartY: 0, pointerDownAt: 0, pointerMoved: false, dragOriginX: 0, dragOriginZ: 0, tapTarget: null, deadline: jobs.some(job => job.kind === 'perishable') ? 70 : Infinity, patrolHeat, hotCargo, ending: false, heading: 0, engineOn: false, lightsOn: currentPlan.night, tutorialOpen: false, tutorialPending: currentPlan.patrols.some(patrol => patrol.sound) && !save.soundTutorialSeen, soundExposure: 0 };
+  run = { x: 0, z: 0, vx: 0, vz: 0, speed: 0, hull: maxHull * (save.boatCondition[save.boat] ?? 100) / 100, maxHull, heat: Math.min(65, patrolHeat * 4 + (hotCargo ? 8 : 0)), contact: 0, damageCooldown: 0, collisions: 0, elapsed: 0, holding: false, pointer: null, pointerX: 0, pointerY: 0, pointerStartX: 0, pointerStartY: 0, pointerDownAt: 0, pointerMoved: false, dragOriginX: 0, dragOriginZ: 0, tapTarget: null, deadline: jobs.some(job => job.kind === 'perishable') ? 70 : Infinity, patrolHeat, hotCargo, ending: false, heading: 0, engineOn: false, lightsOn: currentPlan.night, tutorialOpen: false, tutorialPending: currentPlan.patrols.some(patrol => patrol.sound) && !save.soundTutorialSeen, soundExposure: 0, offshoreTime: 0 };
   world.setNightLighting(currentPlan.night, run.lightsOn);
   heldKeys.clear(); phase = 'run'; render(); beep(400, 0.15, 'triangle'); notify('Cargo aboard. Tap the water or drag to pilot!', 'success');
 }
@@ -408,6 +409,12 @@ function updateHud(): void {
   set('run-timer', `${minutes}:${seconds}`);
   set('port-distance', `${Math.round(Math.hypot(destinationX(currentPlan) - run.x, 532 - run.z))} m`);
   set('engine-status', run.engineOn ? 'ENGINE ON · PATROLS CAN HEAR' : 'ENGINE CUT · COASTING');
+  const seaWarning = document.getElementById('sea-warning');
+  if (seaWarning) {
+    const offshore = offshoreState(currentPlan, run.x, run.z);
+    seaWarning.className = `sea-warning ${offshore.zone}`;
+    seaWarning.textContent = offshore.zone === 'charted' ? '' : offshore.zone === 'warning' ? '⚠ CHARTED WATER ENDS · SWELL AHEAD' : offshore.zone === 'rough' ? '⚠ ROUGH WATER · STEER BACK TOWARD PORT' : '⛔ BREAKERS · HULL DAMAGE AHEAD · STEER BACK';
+  }
   const lightButton = document.getElementById('light-toggle');
   if (lightButton) { lightButton.textContent = run.lightsOn ? '☼ LIGHTS ON' : '◌ LIGHTS OFF'; lightButton.setAttribute('aria-pressed', String(run.lightsOn)); }
   const darkness = document.getElementById('night-visibility');
@@ -492,24 +499,25 @@ function updateRun(dt: number): void {
   if (run.holding && run.pointer !== null) target = dragPoint();
   else if (!heldKeys.size && run.tapTarget) target = run.tapTarget;
   if (target && Math.hypot(target.x - run.x, target.z - run.z) < .65 && !run.holding) { run.tapTarget = null; target = null; }
-  if (target) target = { x: clampToChannel(currentPlan, target.x, Math.max(0, Math.min(ROUTE_END, target.z))), z: Math.max(0, Math.min(ROUTE_END, target.z)) };
+  if (target) target = { x: target.x, z: Math.max(0, Math.min(ROUTE_END, target.z)) };
   const dx = Number(heldKeys.has('arrowright') || heldKeys.has('d')) - Number(heldKeys.has('arrowleft') || heldKeys.has('a'));
   const dz = Number(heldKeys.has('arrowup') || heldKeys.has('w')) - Number(heldKeys.has('arrowdown') || heldKeys.has('s'));
   run.engineOn = Boolean(target || dx || dz);
   const nearListeningBoat = world.patrols.some(patrol => patrol.sound && Math.hypot(run!.x - patrol.x, run!.z - patrol.z) < 19);
   const handling = !run.engineOn && nearListeningBoat ? { ...boat(), coast: .16 } : boat();
   const motion = advanceMotion(run, target, { x: dx, z: dz }, maxSpeed, dt, handling);
-  const lateral = currentPush(currentPlan, motion.x, motion.z, run.elapsed) + weatherPush(currentPlan, run.elapsed);
-  run.vx = motion.vx + lateral * dt; run.vz = motion.vz;
-  const attemptedX = motion.x + lateral * dt * dt * .5;
+  const offshore = offshoreState(currentPlan, motion.x, motion.z);
+  const lateral = currentPush(currentPlan, motion.x, motion.z, run.elapsed) + weatherPush(currentPlan, run.elapsed) + offshore.push;
+  run.vx = (motion.vx + lateral * dt) * (1 - offshore.drag * dt); run.vz = motion.vz * (1 - offshore.drag * dt);
   run.z = Math.max(-2, Math.min(ROUTE_END, motion.z));
-  run.x = clampToChannel(currentPlan, attemptedX, run.z);
-  if (attemptedX !== run.x) {
-    run.vx = 0; run.tapTarget = null;
-    if (run.damageCooldown === 0 && Math.hypot(motion.vx, motion.vz) > 2.8) {
-      run.hull = Math.max(0, run.hull - 14); run.collisions++; run.damageCooldown = 1.35;
-      showImpact('−14 HULL'); beep(135, .22, 'sawtooth'); notify('Shoreline! Keep within the marked channel.', 'danger');
-    }
+  run.x = motion.x + lateral * dt * dt * .5;
+  const newOffshore = offshoreState(currentPlan, run.x, run.z);
+  run.offshoreTime = newOffshore.zone === 'danger' ? run.offshoreTime + dt : 0;
+  if (run.offshoreTime > 1.7 && run.damageCooldown === 0) {
+    const damage = newOffshore.distance > 42 ? 13 : 7;
+    run.hull = Math.max(0, run.hull - damage); run.collisions++; run.damageCooldown = 1.5;
+    showImpact(`−${damage} HULL`); beep(135, .22, 'sawtooth');
+    notify('Breaking swell! Steer back toward the marked route.', 'danger');
   }
   run.speed = Math.hypot(run.vx, run.vz);
   if (run.speed > .25) {
@@ -537,7 +545,7 @@ function updateRun(dt: number): void {
   if (run.contact >= 1.5 || run.soundExposure >= 1.8 || run.heat >= 100) { run.ending = true; showImpact('CAUGHT!'); window.setTimeout(() => endRun(false, 'caught'), 650); return; }
   for (const hazard of world.hazards) {
     if (Math.hypot(run.x - hazard.x, run.z - hazard.z) < hazard.radius + .85 && run.damageCooldown === 0) {
-      const damage = hazard.kind === 'rock' ? 24 : hazard.kind === 'sandbank' ? 17 : 12;
+      const damage = hazard.kind === 'rock' ? 24 : hazard.kind === 'iceberg' ? 27 : hazard.kind === 'sandbank' ? 17 : 12;
       run.hull = Math.max(0, run.hull - damage); run.collisions++; run.damageCooldown = 1.25;
       const awayX = run.x - hazard.x, awayZ = run.z - hazard.z;
       const awayLength = Math.hypot(awayX, awayZ) || 1;
@@ -545,7 +553,7 @@ function updateRun(dt: number): void {
       run.speed = Math.hypot(run.vx, run.vz); run.tapTarget = null;
       showImpact(`−${damage} HULL`);
       beep(135, .22, 'sawtooth'); Haptics.impact({ style: ImpactStyle.Heavy }).catch(() => undefined);
-      notify(hazard.kind === 'rock' ? 'Rock! Steer into open water.' : hazard.kind === 'sandbank' ? 'Sandbank! The shallows scrape your hull.' : 'Buoy bump! Watch the channel.', 'danger');
+      notify(hazard.kind === 'rock' ? 'Rock! Steer into open water.' : hazard.kind === 'iceberg' ? 'Iceberg! Watch the floating ice.' : hazard.kind === 'sandbank' ? 'Sandbank! The shallows scrape your hull.' : 'Buoy bump! Watch the channel.', 'danger');
       if (run.hull <= 0) { run.ending = true; window.setTimeout(() => endRun(false, 'sunk'), 650); return; }
     }
   }

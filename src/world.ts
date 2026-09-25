@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { patrolPose } from './patrols';
-import { channelCenter, channelHalfWidth, destinationX, levelPlan, type LevelPlan } from './levels';
+import { channelCenter, channelHalfWidth, destinationX, levelPlan, offshoreState, type HazardKind, type LevelPlan } from './levels';
 import { HARBORS, type Biome } from './harbors';
 import { BOATS, type BoatDefinition, type BoatStyle } from './model';
 
@@ -239,6 +239,18 @@ function makeSandbank(parent: THREE.Object3D, x: number, z: number, radius: numb
   parent.add(group); return group;
 }
 
+function makeIceberg(parent: THREE.Object3D, x: number, z: number, radius: number): THREE.Group {
+  const group = new THREE.Group(); group.position.set(x, 0, z);
+  const skirt = new THREE.Mesh(new THREE.CylinderGeometry(radius * 1.07, radius * 1.3, .5, 7), mat('#73b9ca'));
+  skirt.position.y = -.18; group.add(skirt);
+  const body = new THREE.Mesh(new THREE.DodecahedronGeometry(radius * .83, 0), mat('#d8f2f1'));
+  body.scale.set(1.08, 1.35, .95); body.position.y = .6; body.rotation.set(.2, .3, -.14); group.add(body);
+  cone(group, '#f8fffa', -.18 * radius, radius * 1.15, -.1 * radius, radius * .48, radius * 1.15, 5).rotation.z = -.25;
+  const ring = new THREE.Mesh(new THREE.RingGeometry(radius * 1.04, radius * 1.3, 24), new THREE.MeshBasicMaterial({ color: '#e5fffb', transparent: true, opacity: .64, side: THREE.DoubleSide, depthWrite: false }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = .08; group.add(ring);
+  parent.add(group); return group;
+}
+
 function makeCoastalLandmark(parent: THREE.Object3D, x: number, z: number, biome: Biome, accent: string, seed: number): void {
   const group = new THREE.Group(); group.position.set(x, 0, z);
   const base = cylinder(group, biome === 'volcanic' ? '#615e67' : biome === 'ice' ? '#e5eee5' : '#eed294', 0, .24, 0, 2.3, .45, 7);
@@ -264,23 +276,32 @@ function makeCoastalLandmark(parent: THREE.Object3D, x: number, z: number, biome
 function makeChannelBanks(parent: THREE.Object3D, plan: LevelPlan): void {
   const harbor = HARBORS[plan.port];
   for (const side of [-1, 1]) {
-    for (const [offset, span, color, height] of [[0, 34, harbor.biome === 'volcanic' ? '#bd9c84' : harbor.biome === 'ice' ? '#d6e4dc' : '#e9c783', .055], [4.3, 29, harbor.color, .11]] as const) {
+    const colors = harbor.biome === 'ice' ? ['#b7eee9', '#8ac7db', '#e4fcf7'] : harbor.biome === 'volcanic' ? ['#68b5b5', '#638fa2', '#dfc9ae'] : harbor.biome === 'reef' ? ['#80e2ce', '#75bad0', '#e7fff0'] : ['#80d4cf', '#70b0c4', '#d7f2e8'];
+    for (const [offset, span, color, height, opacity] of [[0, 8, colors[0], .055, .28], [8, 12, colors[1], .075, .24], [20, 40, colors[2], .045, .09]] as const) {
       const vertices: number[] = []; const indices: number[] = [];
       for (let z = -22; z <= 548; z += 6) {
         const center = channelCenter(plan, z);
-        const edge = center + side * (channelHalfWidth(plan, z) + offset);
-        vertices.push(edge, height, z, center + side * (channelHalfWidth(plan, z) + offset + span), height, z);
+        const ragged = Math.sin(z * .16 + plan.port + offset) * .55 + Math.sin(z * .07 + side * 2) * .4;
+        const edge = center + side * (channelHalfWidth(plan, z) + offset + ragged);
+        vertices.push(edge, height, z, center + side * (channelHalfWidth(plan, z) + offset + span + ragged), height, z);
         if (z > -22) { const i = (z + 22) / 6 * 2; indices.push(i - 2, i - 1, i, i - 1, i + 1, i); }
       }
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
       geometry.setIndex(indices); geometry.computeVertexNormals();
-      const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide }));
+      const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide }));
       parent.add(mesh);
     }
-    for (let z = 22; z < 520; z += 42) {
-      const x = channelCenter(plan, z) + side * (channelHalfWidth(plan, z) + 9);
-      if (harbor.biome === 'cove') makeIsland(parent, x, z, .42 + ((z * 7) % 5) * .035);
+    for (let z = 24; z < 520; z += 18) {
+      const jitter = Math.sin(z * 7.13 + plan.port * 3.1 + side) * 4;
+      const x = channelCenter(plan, z) + side * (channelHalfWidth(plan, z) + 11 + jitter);
+      const crest = new THREE.Mesh(new THREE.TorusGeometry(1.25 + Math.abs(jitter) * .16, .055, 3, 11, Math.PI * (1.05 + Math.abs(jitter) * .08)), new THREE.MeshBasicMaterial({ color: colors[2], transparent: true, opacity: .48, depthWrite: false }));
+      crest.rotation.x = -Math.PI / 2; crest.rotation.z = side * .35 + jitter * .12; crest.position.set(x, .14, z + jitter); parent.add(crest);
+    }
+    for (let z = 46; z < 520; z += 76) {
+      const x = channelCenter(plan, z) + side * (channelHalfWidth(plan, z) + 27 + (z % 3) * 5);
+      if (harbor.biome === 'ice') makeIceberg(parent, x, z + side * 7, 1.8 + (z % 4) * .25);
+      else if (harbor.biome === 'cove' && z % 3 === 1) makeIsland(parent, x, z, .45);
       else makeCoastalLandmark(parent, x, z, harbor.biome, harbor.color, z + plan.port);
     }
   }
@@ -383,7 +404,7 @@ function makeHullFoam(width: number, length: number): THREE.Mesh {
   return foam;
 }
 
-export interface Hazard { x: number; z: number; radius: number; kind: 'rock' | 'buoy' | 'sandbank'; mesh: THREE.Group; }
+export interface Hazard { x: number; z: number; radius: number; kind: HazardKind; mesh: THREE.Group; }
 export interface Patrol { x: number; z: number; baseX: number; baseZ: number; phase: number; heading: number; chase: number; sound: boolean; mesh: THREE.Group; light: THREE.Mesh; ring: THREE.Mesh | null; foam: THREE.Mesh; wake: THREE.Mesh; }
 interface DockParcel { mesh: THREE.Object3D; start: THREE.Vector3; end: THREE.Vector3; launch: number }
 interface Docking { fromX: number; fromZ: number; time: number; approach: number; parcels: Array<DockParcel | null> }
@@ -426,6 +447,7 @@ export class World {
   private heading = 0;
   private damageTime = 0;
   private elapsed = 0;
+  private seaRoughness = 0;
   private width = 1;
   private height = 1;
 
@@ -448,18 +470,18 @@ export class World {
     const water = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false,
       uniforms: {
-        uTime: { value: 0 }, uDeep: { value: new THREE.Color('#087f94') },
+        uTime: { value: 0 }, uRoughness: { value: 0 }, uDeep: { value: new THREE.Color('#087f94') },
         uLight: { value: new THREE.Color('#2ba9b1') }, uFoam: { value: new THREE.Color('#a1e6dc') },
       },
-      vertexShader: `uniform float uTime; varying vec3 vWater;
+      vertexShader: `uniform float uTime; uniform float uRoughness; varying vec3 vWater;
         void main() {
           vec3 p = position;
-          p.z = sin(p.x * 0.42 + uTime * 1.1) * 0.08 + sin(p.y * 0.25 - uTime * 0.85) * 0.06
-            + sin(p.x * 0.9 + p.y * 0.47 + uTime * 1.55) * 0.035;
+          p.z = (sin(p.x * 0.42 + uTime * 1.1) * 0.08 + sin(p.y * 0.25 - uTime * 0.85) * 0.06
+            + sin(p.x * 0.9 + p.y * 0.47 + uTime * 1.55) * 0.035) * (1.0 + uRoughness * 2.2);
           vWater = (modelMatrix * vec4(position, 1.0)).xyz;
           gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
         }`,
-      fragmentShader: `uniform float uTime; uniform vec3 uDeep; uniform vec3 uLight; uniform vec3 uFoam; varying vec3 vWater;
+      fragmentShader: `uniform float uTime; uniform float uRoughness; uniform vec3 uDeep; uniform vec3 uLight; uniform vec3 uFoam; varying vec3 vWater;
         float hash21(vec2 p) {
           return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
         }
@@ -489,7 +511,7 @@ export class World {
             + localRipple(p + vec2(4.1, 6.7), 21.0, 0.09, 19.0);
           float glint = smoothstep(0.72, 0.97, swell * crossing) * 0.06;
           vec3 color = mix(uDeep, uLight, shade);
-          color = mix(color, uFoam, min(0.26, ripples * 0.24 + glint));
+          color = mix(color, uFoam, min(0.44, ripples * 0.24 + glint + uRoughness * smoothstep(0.44, 0.8, swell * crossing) * 0.28));
           gl_FragColor = vec4(color, 0.82);
           #include <colorspace_fragment>
         }`,
@@ -721,7 +743,8 @@ export class World {
     for (const hazard of this.plan.hazards) {
       const mesh = hazard.kind === 'rock' ? makeRock(this.route, hazard.x, hazard.z, hazard.radius)
         : hazard.kind === 'sandbank' ? makeSandbank(this.route, hazard.x, hazard.z, hazard.radius)
-          : makeBuoy(this.route, hazard.x, hazard.z);
+          : hazard.kind === 'iceberg' ? makeIceberg(this.route, hazard.x, hazard.z, hazard.radius)
+            : makeBuoy(this.route, hazard.x, hazard.z);
       this.hazards.push({ ...hazard, mesh });
     }
     for (const current of this.plan.currents) {
@@ -803,14 +826,17 @@ export class World {
   private waterHeight(x: number, z: number): number {
     // Keep the hull and foam in phase with the ocean vertex shader.
     const localX = x - this.ocean.position.x;
-    return -0.04 + Math.sin(localX * 0.42 + this.elapsed * 1.1) * 0.08
+    return -0.04 + (Math.sin(localX * 0.42 + this.elapsed * 1.1) * 0.08
       + Math.sin((260 - z) * 0.25 - this.elapsed * 0.85) * 0.06
-      + Math.sin(localX * 0.9 + (260 - z) * 0.47 + this.elapsed * 1.55) * 0.035;
+      + Math.sin(localX * 0.9 + (260 - z) * 0.47 + this.elapsed * 1.55) * 0.035) * (1 + this.seaRoughness * 2.2);
   }
 
   update(dt: number, running: boolean, x: number, z: number, heat: number, boatSpeed: number, vx = 0, vz = 0, target: { x: number; z: number } | null = null): void {
     this.elapsed += dt;
     (this.ocean.material as THREE.ShaderMaterial).uniforms.uTime.value = this.elapsed;
+    const roughnessTarget = running && !this.inYard ? offshoreState(this.plan, x, z).swell : 0;
+    this.seaRoughness += (roughnessTarget - this.seaRoughness) * Math.min(1, dt * 1.6);
+    (this.ocean.material as THREE.ShaderMaterial).uniforms.uRoughness.value = this.seaRoughness;
     if (this.docking) {
       this.docking.time += dt;
       const progress = Math.min(1, this.docking.time / this.docking.approach);
@@ -834,9 +860,9 @@ export class World {
     const bob = Math.sin(this.elapsed * 2.15 + z * 0.15) * 0.04;
     this.boat.position.set(x, surface - 0.94 + bob, z);
     this.boat.rotation.set(
-      Math.sin(this.elapsed * 1.75 + z * 0.08) * 0.038 + vz * 0.003,
+      Math.sin(this.elapsed * 1.75 + z * 0.08) * (0.038 + this.seaRoughness * .09) + vz * 0.003,
       this.heading,
-      Math.sin(this.elapsed * 2.1 + x * 0.3) * 0.045 - vx * 0.007 + (this.damageTime > 0 ? Math.sin(this.elapsed * 46) * this.damageTime * 0.17 : 0),
+      Math.sin(this.elapsed * 2.1 + x * 0.3) * (0.045 + this.seaRoughness * .11) - vx * 0.007 + (this.damageTime > 0 ? Math.sin(this.elapsed * 46) * this.damageTime * 0.17 : 0),
     );
     if (this.docking) {
       this.boat.updateMatrixWorld(true);

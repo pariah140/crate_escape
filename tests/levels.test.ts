@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { HARBORS } from '../src/harbors';
-import { levelPlan, channelCenter, channelHalfWidth, clampToChannel, currentPush, destinationX, weatherPush } from '../src/levels';
+import { levelPlan, channelCenter, channelHalfWidth, offshoreState, currentPush, destinationX, weatherPush } from '../src/levels';
 
 test('all 25 harbors have distinct fixed coastal routes', () => {
   assert.equal(HARBORS.length, 25);
@@ -44,12 +44,25 @@ test('coastal physics, hazards and destination agree with the curved route', () 
     const center = channelCenter(plan, z);
     const half = channelHalfWidth(plan, z);
     assert.ok(half > 13);
-    assert.ok(clampToChannel(plan, 100, z) < center + half);
-    assert.ok(clampToChannel(plan, -100, z) > center - half);
+    assert.equal(offshoreState(plan, center, z).zone, 'charted');
+    assert.equal(offshoreState(plan, center + half + 2, z).zone, 'warning');
+    assert.equal(offshoreState(plan, center - half - 12, z).zone, 'rough');
+    assert.equal(offshoreState(plan, center + half + 23, z).zone, 'danger');
+    assert.ok(offshoreState(plan, center + half + 23, z).push < 0);
+    assert.ok(offshoreState(plan, center - half - 23, z).push > 0);
   }
   assert.equal(destinationX(plan), channelCenter(plan, 532) - 1.8);
   const current = plan.currents[0];
   assert.notEqual(currentPush(plan, current.x, current.z, 0), 0);
   assert.equal(currentPush(plan, 100, 100, 0), 0);
   assert.equal(weatherPush(levelPlan(1, 0), 5), 0);
+});
+
+test('icy harbors generate visible iceberg hazards and snowy voyages', () => {
+  for (const port of [8, 16, 23]) {
+    const plan = levelPlan(41, port);
+    assert.ok(plan.hazards.some(hazard => hazard.kind === 'iceberg'));
+    assert.ok(Array.from({ length: 4 }, (_, i) => levelPlan(41 + i, port)).some(voyage => voyage.weather === 'snow'));
+  }
+  assert.equal(levelPlan(41, 0).hazards.some(hazard => hazard.kind === 'iceberg'), false);
 });
