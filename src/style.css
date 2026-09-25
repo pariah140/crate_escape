@@ -46,27 +46,26 @@ button:active:not(:disabled) { transform: translateY(2px); }
 .coin-pill span { color: var(--yellow); font-size: 18px; }
 .icon-button { width: 42px; height: 42px; border: 2px solid rgba(255,245,218,.7); border-radius: 50%; background: rgba(5,67,79,.75); color: var(--paper); font-size: 22px; font-weight: 900; transition: background .15s, transform .15s; }
 .icon-button:hover { background: var(--ink); }
-.account-button { min-height: 42px; padding: 0 13px; border: 2px solid rgba(255,245,218,.75); border-radius: 999px; color: var(--paper); background: rgba(5,67,79,.85); font: 900 11px ui-monospace, monospace; white-space: nowrap; }
-.account-button:hover { background: var(--ink); }
+.cloud-button { min-height: 42px; padding: 0 13px; border: 2px solid rgba(255,245,218,.75); border-radius: 999px; color: var(--paper); background: rgba(5,67,79,.85); font: 900 11px ui-monospace, monospace; white-space: nowrap; }
+.cloud-button.is-synced { border-color: var(--mint); }
+.cloud-button.needs-choice { border-color: var(--yellow); background: #a96242; }
+.cloud-button:hover { background: var(--ink); }
 #view { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
 #view > * { pointer-events: auto; }
 .side-panel { position: absolute; top: 102px; bottom: 24px; right: 24px; width: min(464px, calc(100% - 48px)); padding: 26px; background: var(--paper); border: 3px solid var(--ink); border-radius: 26px; box-shadow: 9px 11px 0 rgba(7,66,75,.78); display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
-.account-panel { gap: 14px; }
-.account-panel .panel-head { margin-bottom: 3px; }
-.account-status, .account-save, .account-conflict, .account-danger { padding: 16px; border: 2px solid #bed5c6; border-radius: 17px; background: #e6f0d8; }
-.account-status .eyebrow, .account-save .eyebrow { display: block; color: #54817d; margin-bottom: 6px; }
-.account-status strong, .account-save strong { display: block; font-size: 17px; overflow-wrap: anywhere; }
-.account-status p, .account-copy, .account-danger p, .account-conflict p, .account-help { margin: 7px 0 0; color: #56747b; font-size: 12px; line-height: 1.45; }
-.account-save { background: #fffaf0; border-color: #e8d8ba; }
-.account-conflict { background: #fff3d6; border-color: #d9ad68; display: grid; gap: 10px; }
-.account-conflict > div { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
-.account-conflict > div span { color: #7b6a50; }
-.apple-button { min-height: 49px; border: 2px solid #080d10; border-radius: 13px; background: #101820; color: white; font-size: 16px; font-weight: 800; }
-.apple-button:hover:not(:disabled) { background: #253c49; }
-.account-danger { margin-top: 8px; background: #fff1e6; border-color: #e8c6b5; }
-.account-danger strong { font-size: 14px; }
-.delete-button { margin-top: 11px; padding: 9px 12px; border: 2px solid #9e3b32; border-radius: 10px; background: #c84f42; color: white; font-weight: 900; }
-.account-panel .panel-foot { margin-top: auto; }
+.cloud-panel { gap: 14px; }
+.cloud-panel .panel-head { margin-bottom: 3px; }
+.cloud-status, .cloud-save, .cloud-conflict, .cloud-purchases { padding: 16px; border: 2px solid #bed5c6; border-radius: 17px; background: #e6f0d8; }
+.cloud-status .eyebrow, .cloud-save .eyebrow { display: block; color: #54817d; margin-bottom: 6px; }
+.cloud-status strong, .cloud-save strong { display: block; font-size: 17px; overflow-wrap: anywhere; }
+.cloud-status p, .cloud-conflict p, .cloud-purchases p { margin: 7px 0 0; color: #56747b; font-size: 12px; line-height: 1.45; }
+.cloud-save { background: #fffaf0; border-color: #e8d8ba; }
+.cloud-conflict { background: #fff3d6; border-color: #d9ad68; display: grid; gap: 10px; }
+.cloud-conflict > div { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.cloud-conflict > div span { color: #7b6a50; }
+.cloud-purchases { background: #fffaf0; border-color: #e8d8ba; }
+.cloud-purchases .secondary-button { margin-top: 12px; }
+.cloud-panel .panel-foot { margin-top: auto; }
 .panel-head { margin-bottom: 20px; }
 .step-label, .eyebrow, .section-heading, .tray-heading { font: 900 10px ui-monospace, 'SFMono-Regular', monospace; letter-spacing: .13em; }
 .step-label { display: flex; align-items: center; gap: 8px; color: #47747b; }
@@ -310,7 +309,7 @@ button:active:not(:disabled) { transform: translateY(2px); }
   .brand small { font-size: 7px; letter-spacing: .08em; }
   .coin-pill { min-width: 65px; padding: 8px 9px; gap: 5px; font-size: 12px; }
   .icon-button { width: 36px; height: 36px; font-size: 18px; }
-  .account-button { min-height: 36px; padding: 0 8px; font-size: 9px; }
+  .cloud-button { min-height: 36px; padding: 0 8px; font-size: 9px; }
   .side-panel { top: auto; left: 10px; right: 10px; bottom: max(10px, env(safe-area-inset-bottom)); width: auto; max-height: min(66dvh, 700px); padding: 18px 17px 15px; border-radius: 22px; box-shadow: 5px 6px 0 rgba(7,66,75,.78); }
   .panel-head { margin-bottom: 14px; }
   .panel-head h1 { font-size: 36px; }

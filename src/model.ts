@@ -1,7 +1,7 @@
 import { HARBORS } from './harbors';
 export { HARBORS } from './harbors';
 
-export type Phase = 'board' | 'pack' | 'run' | 'result' | 'yard' | 'market' | 'map' | 'account';
+export type Phase = 'board' | 'pack' | 'run' | 'result' | 'yard' | 'market' | 'map' | 'cloud';
 export type CargoKind = 'standard' | 'bulky' | 'hot' | 'perishable' | 'fragile' | 'vip';
 export type Cell = readonly [number, number];
 export type Shape = 'single' | 'domino' | 'line3' | 'square' | 'ell' | 'tee' | 'ess';
@@ -337,11 +337,15 @@ export function defaultSave(): SaveData {
 }
 
 export const GUEST_SAVE_KEY = 'crate-escape-save-v1';
-export const accountSaveKey = (userId: string): string => `${GUEST_SAVE_KEY}:account:${userId}`;
 
 export function loadSave(key = GUEST_SAVE_KEY): SaveData {
+  try { return parseSave(JSON.parse(localStorage.getItem(key) || 'null')); }
+  catch { return defaultSave(); }
+}
+
+export function parseSave(raw: unknown): SaveData {
   try {
-    const data = JSON.parse(localStorage.getItem(key) || 'null') as (Partial<SaveData> & { upgrades?: BoatUpgrades }) | null;
+    const data = raw as (Partial<SaveData> & { upgrades?: BoatUpgrades }) | null;
     if (!data || typeof data.cash !== 'number') return defaultSave();
     const initial = defaultSave();
     const selected = Number.isInteger(data.boat) && data.boat! >= 0 && data.boat! < BOATS.length ? data.boat! : 0;

@@ -73,25 +73,6 @@ test('previous saves keep the owned speedboat and upgrades', async () => {
   } finally { Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: previous }); }
 });
 
-test('account saves stay separate from an existing guest save', async () => {
-  const { accountSaveKey, defaultSave, loadSave, persist } = await import('../src/model');
-  const entries = new Map<string, string>();
-  const previous = globalThis.localStorage;
-  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
-    getItem: (key: string) => entries.get(key) ?? null,
-    setItem: (key: string, value: string) => { entries.set(key, value); },
-  } });
-  try {
-    const guest = defaultSave(); guest.cash = 246;
-    const account = defaultSave(); account.cash = 789;
-    persist(guest);
-    persist(account, accountSaveKey('captain-1'));
-    assert.equal(loadSave().cash, 246);
-    assert.equal(loadSave(accountSaveKey('captain-1')).cash, 789);
-    assert.equal(loadSave(accountSaveKey('captain-2')).cash, 80);
-  } finally { Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: previous }); }
-});
-
 test('backup sailboat is always owned, free to repair, and can carry a job from every harbor', async () => {
   const { BACKUP_BOAT_INDEX, BOATS, HARBORS, defaultSave, repairCost } = await import('../src/model');
   const save = defaultSave();

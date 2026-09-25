@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite. Guest play saves progress on the device and remains available offline. Optional Apple sign-in and cloud progress need the setup in [SIGN_IN_PLAN.md](SIGN_IN_PLAN.md).
+Open the local URL printed by Vite. The browser saves progress on that device. The iOS app also syncs its compact game save through the player's iCloud account, with no in-game sign-in. See [CLOUD_SAVES.md](CLOUD_SAVES.md).
 
 ## Controls
 
@@ -31,7 +31,7 @@ npm run ios:sync
 npm run ios:open
 ```
 
-The generated `ios/` project includes original app icon and splash art. Ads, purchases, Game Center, iCloud sync, and App Store submission require production accounts, SDK configuration, and a later release phase.
+The generated `ios/` project includes original app icon and splash art, an iCloud save bridge, and a StoreKit bridge for restoring future permanent purchases. The iCloud entitlement must be enabled on the App ID and tested on a signed device before release. No paid products are currently configured in App Store Connect.
 
 ## Design and scope
 

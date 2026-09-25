@@ -1,8 +1,8 @@
 import './style.css';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Share } from '@capacitor/share';
-import type { User } from '@supabase/supabase-js';
-import { accountConfigured, currentUser, deleteAccount, fetchCloudSave, signInWithApple, signOut, writeCloudSave, type CloudSave } from './account';
+import { cloudSupported, cloudDeviceId, readCloud, writeCloudSave, watchCloud, currentEntitlements, restorePurchases, type CloudRecord } from './cloud';
+import { incomingCloudRecord } from './cloud-policy';
 import { World } from './world';
 import { advanceMotion } from './piloting';
 import { canDock, channelCenter, currentPush, destinationX, destinationZ, levelPlan, offshoreState, roughWaterPush, weatherPush, type LevelPlan } from './levels';
@@ -10,7 +10,7 @@ import { screenArrow } from './navigation';
 import { heardBySoundPatrol, inVisionCone, sightProfile } from './patrols';
 import {
   BOATS, PORTS, HARBORS, SHAPE_NAMES, canFitAll, canPlace, jobById, jobsForPort,
-  accountSaveKey, GUEST_SAVE_KEY, loadSave, occupiedCells, persist, rotatedCells, usableCells, isBlocked, boatUpgrade, repairCost, rareChance, specialOfferFor,
+  loadSave, occupiedCells, persist, rotatedCells, usableCells, isBlocked, boatUpgrade, repairCost, rareChance, specialOfferFor,
   harborRequirements, refreshHarborUnlocks, openHarbor, recordHarborDelivery, HARBOR_GATES, estimateCargoPay, voyageReceipt, boatTraits, impactDamage, conditionHandling, charterChallenge, completesChallenge,
   BACKUP_BOAT_INDEX, MIN_SEAWORTHY_CONDITION,
   type Job, type Phase, type Piece, type SaveData,
@@ -20,7 +20,7 @@ const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `<div class="game-shell">
   <div id="scene" class="scene" aria-label="Colorful isometric harbour game scene"></div>
   <div class="scene-vignette"></div>
-  <header class="topbar"><div class="brand-mark" aria-hidden="true">◈</div><div class="brand"><strong>CRATE <span>ESCAPE</span></strong><small>PACK IT · RUN IT · DON'T GET CAUGHT</small></div><div class="topbar-right"><button id="account-button" class="account-button" type="button">Guest</button><span id="cash" class="coin-pill"></span><button id="sound" class="icon-button" type="button" aria-label="Toggle sound"></button></div></header>
+  <header class="topbar"><div class="brand-mark" aria-hidden="true">◈</div><div class="brand"><strong>CRATE <span>ESCAPE</span></strong><small>PACK IT · RUN IT · DON'T GET CAUGHT</small></div><div class="topbar-right"><button id="cloud-button" class="cloud-button" type="button" aria-label="Save and purchases">☁ <span>Save</span></button><span id="cash" class="coin-pill"></span><button id="sound" class="icon-button" type="button" aria-label="Toggle sound"></button></div></header>
   <div id="view"></div>
   <div id="damage-flash" class="damage-flash" aria-hidden="true"></div>
   <div id="damage-callout" class="damage-callout" role="status" aria-live="polite"></div>
@@ -35,18 +35,16 @@ const damageFlashEl = document.querySelector<HTMLElement>('#damage-flash')!;
 const damageCalloutEl = document.querySelector<HTMLElement>('#damage-callout')!;
 const cashEl = document.querySelector<HTMLElement>('#cash')!;
 const soundEl = document.querySelector<HTMLButtonElement>('#sound')!;
-const accountButton = document.querySelector<HTMLButtonElement>('#account-button')!;
+const cloudButton = document.querySelector<HTMLButtonElement>('#cloud-button')!;
 const world = new World(sceneHost);
 const save = loadSave();
-let accountUser: User | null = null;
-let deferredUser: User | null = null;
-let saveKey = GUEST_SAVE_KEY;
-let cloudRevision: number | null = null;
-let cloudState = 'Playing as guest';
-let pendingCloud: CloudSave | null = null;
-let deleteConfirm = false;
-let syncRunning = false;
-let syncRequested = false;
+const deviceId = cloudSupported ? cloudDeviceId() : 'browser';
+let cloudAvailable = false;
+let cloudState = cloudSupported ? 'Checking iCloud…' : 'Saved on this device';
+let pendingCloud: CloudRecord | null = null;
+let cloudRecords: CloudRecord[] = [];
+let purchasedProducts: string[] = [];
+let syncTimer = 0;
 world.setBoat(BOATS[save.boat]);
 let currentPlan: LevelPlan = levelPlan(save.level, save.port);
 world.configureLevel(currentPlan);
@@ -103,12 +101,15 @@ function notify(message: string, tone: 'info' | 'success' | 'danger' = 'info'): 
   toastEl.textContent = message; toastEl.dataset.tone = tone; toastEl.classList.add('visible');
   window.clearTimeout(toastTimer); toastTimer = window.setTimeout(() => toastEl.classList.remove('visible'), 3200);
 }
-function saveProgress(): void { persist(save, saveKey); updateChrome(); if (accountUser && !pendingCloud) requestCloudSync(); }
+function saveProgress(): void { persist(save); updateChrome(); if (cloudAvailable && !pendingCloud) scheduleCloudSave(); }
 function updateChrome(): void {
   cashEl.innerHTML = `<span aria-hidden="true">●</span> ${money(save.cash)}`;
   soundEl.innerHTML = save.sound ? '♪' : '♩'; soundEl.setAttribute('aria-label', save.sound ? 'Mute sound' : 'Turn on sound');
-  accountButton.textContent = accountUser ? '☻ Account' : '☻ Guest';
-  accountButton.disabled = phase === 'run';
+  cloudButton.classList.toggle('is-synced', cloudAvailable);
+  cloudButton.classList.toggle('needs-choice', Boolean(pendingCloud));
+  cloudButton.setAttribute('aria-label', pendingCloud ? 'Choose between device and iCloud saves' : cloudSupported ? 'iCloud save and purchases' : 'Device save');
+  cloudButton.querySelector('span')!.textContent = pendingCloud ? 'Choose' : 'Save';
+  cloudButton.disabled = phase === 'run';
 }
 
 function replaceSave(next: SaveData): void {
@@ -120,65 +121,51 @@ function replaceSave(next: SaveData): void {
 
 function hasProgress(data: SaveData): boolean { return data.runs > 0 || data.ownedBoats.length > 2 || data.cash !== 80 || data.unlockedPorts.length > 1; }
 function saveSummary(data: SaveData): string { return `${data.runs} deliveries · ${data.ownedBoats.length} boats · ${data.unlockedPorts.length} ${data.unlockedPorts.length === 1 ? 'harbor' : 'harbors'} · ${money(data.cash)}`; }
+const saveMatches = (a: SaveData, b: SaveData): boolean => JSON.stringify(a) === JSON.stringify(b);
 
-async function connectAccount(user: User): Promise<void> {
-  accountUser = user; saveKey = accountSaveKey(user.id); cloudState = 'Checking cloud progress…'; pendingCloud = null;
-  let accountLocalExists = false;
-  try { accountLocalExists = localStorage.getItem(saveKey) !== null; } catch { /* Storage can be unavailable in private mode. */ }
-  const candidate = accountLocalExists ? loadSave(saveKey) : loadSave(GUEST_SAVE_KEY);
-  try {
-    const cloud = await fetchCloudSave(user.id);
-    if (!cloud) {
-      replaceSave(candidate); persist(save, saveKey);
-      cloudRevision = null; requestCloudSync();
-    } else {
-      cloudRevision = cloud.revision;
-      if (hasProgress(candidate) && JSON.stringify(candidate) !== JSON.stringify(cloud.save_data)) {
-        pendingCloud = cloud; replaceSave(candidate); cloudState = 'Choose which progress to keep';
-      } else {
-        replaceSave(cloud.save_data); persist(save, saveKey); cloudState = 'Cloud progress is current';
-      }
-    }
-  } catch (error) {
-    replaceSave(candidate); cloudState = `Cloud unavailable: ${error instanceof Error ? error.message : String(error)}`;
+function evaluateCloud(records: CloudRecord[]): void {
+  cloudRecords = records;
+  if (!cloudAvailable || pendingCloud) return;
+  const other = incomingCloudRecord(records, deviceId, resolvedMap());
+  if (!other) {
+    const own = records.find(record => record.deviceId === deviceId);
+    if (own && saveMatches(save, own.save)) cloudState = 'Progress saved in iCloud';
+    else if (hasProgress(save) || records.length) { cloudState = 'Syncing progress to iCloud…'; scheduleCloudSave(); }
+    return;
   }
-  render();
+  if (saveMatches(save, other.save)) { rememberResolved(records); cloudState = 'Progress saved in iCloud'; return; }
+  if (!hasProgress(save) && phase !== 'run') {
+    rememberResolved(records); replaceSave(other.save); persist(save); scheduleCloudSave(); cloudState = 'Progress restored from iCloud';
+    return;
+  }
+  window.clearTimeout(syncTimer);
+  pendingCloud = other; cloudState = 'Choose which progress to keep';
+  if (phase !== 'run') { phase = 'cloud'; render(); }
 }
 
-function requestCloudSync(): void {
-  syncRequested = true;
-  if (syncRunning || !accountUser || pendingCloud) return;
-  syncRunning = true;
-  void (async () => {
-    while (syncRequested && accountUser && !pendingCloud) {
-      syncRequested = false;
-      const userId: string = accountUser.id;
-      const snapshot = structuredClone(save);
-      try {
-        const revision = await writeCloudSave(userId, snapshot, cloudRevision);
-        if (accountUser?.id !== userId) break;
-        cloudRevision = revision; cloudState = 'Progress saved to cloud';
-      } catch (error) {
-        if (accountUser?.id !== userId) break;
-        cloudState = error instanceof Error ? error.message : String(error);
-        try { pendingCloud = await fetchCloudSave(userId); } catch { /* Retry manually once online. */ }
-        if (pendingCloud) cloudState = 'Cloud progress changed. Choose which copy to keep.';
-        break;
-      }
-    }
-    syncRunning = false;
-    if (phase === 'account') render();
-  })();
+function resolvedMap(): Record<string, number> {
+  try { return JSON.parse(localStorage.getItem('crate-escape-resolved-cloud-v1') || '{}') as Record<string, number>; }
+  catch { return {}; }
+}
+function rememberResolved(records: CloudRecord[]): void {
+  const map = resolvedMap(); records.forEach(record => { map[record.deviceId] = Math.max(map[record.deviceId] ?? 0, record.savedAt); });
+  try { localStorage.setItem('crate-escape-resolved-cloud-v1', JSON.stringify(map)); } catch { /* Local save still works. */ }
+}
+function scheduleCloudSave(): void {
+  window.clearTimeout(syncTimer);
+  syncTimer = window.setTimeout(() => { void writeCloudSave(deviceId, save).then(() => {
+    cloudState = 'Progress saved in iCloud'; if (phase === 'cloud') render();
+  }).catch(error => { cloudState = `iCloud sync paused: ${error instanceof Error ? error.message : String(error)}`; if (phase === 'cloud') render(); }); }, 900);
 }
 
-function renderAccount(): void {
-  const name = accountUser?.user_metadata?.full_name || accountUser?.email || 'Apple account';
-  view.innerHTML = `<main class="side-panel account-panel" aria-label="Account and cloud save">
-    ${headerStep('YOUR CAPTAIN’S LOG', 'Account', 'Keep your fleet and voyages when you change devices.')}
-    <div class="account-status"><span class="eyebrow">${accountUser ? 'SIGNED IN WITH APPLE' : 'GUEST CAPTAIN'}</span><strong>${escapeHtml(accountUser ? name : 'Progress on this device')}</strong><p>${escapeHtml(cloudState)}</p></div>
-    <div class="account-save"><span class="eyebrow">CURRENT PROGRESS</span><strong>${saveSummary(save)}</strong></div>
-    ${pendingCloud ? `<div class="account-conflict"><strong>Two voyages found</strong><p>Choose the progress you want to keep. The other copy will be replaced.</p><div><span>This device</span><b>${saveSummary(save)}</b></div><div><span>Cloud</span><b>${saveSummary(pendingCloud.save_data)}</b></div><button class="primary-button full" type="button" data-action="use-cloud">Use cloud progress</button><button class="secondary-button full" type="button" data-action="use-device">Use this device</button></div>` : ''}
-    ${!accountUser ? `<p class="account-copy">Play freely as a guest. Sign in with Apple when you want to carry progress to another device.</p><button class="apple-button" type="button" data-action="apple-sign-in" ${accountConfigured ? '' : 'disabled'}>Sign in with Apple</button>${accountConfigured ? '' : '<p class="account-help">Apple sign-in is being prepared. Guest play is ready.</p>'}` : `<button class="secondary-button full" type="button" data-action="sync-now" ${pendingCloud ? 'disabled' : ''}>↻ Sync progress</button><button class="secondary-button full" type="button" data-action="sign-out">Sign out</button><div class="account-danger"><strong>Delete account</strong><p>Remove your Apple-linked account and cloud progress. This device’s guest progress stays available.</p>${deleteConfirm ? '<button class="delete-button" type="button" data-action="confirm-delete">Confirm permanent deletion</button><button class="text-button" type="button" data-action="cancel-delete">Cancel</button>' : '<button class="text-button" type="button" data-action="ask-delete">Delete my account…</button>'}</div>`}
+function renderCloud(): void {
+  view.innerHTML = `<main class="side-panel cloud-panel" aria-label="Save and purchases">
+    ${headerStep('YOUR CAPTAIN’S LOG', 'Save progress', 'Your voyages stay on this device and can travel with iCloud on iPhone.')}
+    <div class="cloud-status"><span class="eyebrow">${cloudAvailable ? 'ICLOUD AVAILABLE' : cloudSupported ? 'ICLOUD UNAVAILABLE' : 'BROWSER SAVE'}</span><strong>${escapeHtml(cloudState)}</strong><p>${cloudAvailable ? 'Your iCloud account carries progress between Apple devices.' : cloudSupported ? 'Check that iCloud is enabled for this app. Your device save remains safe.' : 'This browser keeps its own local progress.'}</p></div>
+    <div class="cloud-save"><span class="eyebrow">CURRENT PROGRESS</span><strong>${saveSummary(save)}</strong></div>
+    ${pendingCloud ? `<div class="cloud-conflict"><strong>Two voyages found</strong><p>Choose the progress to continue with. Nothing changes until you choose.</p><div><span>This device</span><b>${saveSummary(save)}</b></div><div><span>iCloud</span><b>${saveSummary(pendingCloud.save)}</b></div><button class="primary-button full" type="button" data-action="use-cloud">Use iCloud progress</button><button class="secondary-button full" type="button" data-action="use-device">Keep this device</button></div>` : ''}
+    ${cloudAvailable && !pendingCloud ? '<button class="secondary-button full" type="button" data-action="sync-now">↻ Check iCloud now</button>' : ''}
+    ${cloudSupported ? `<div class="cloud-purchases"><strong>App Store purchases</strong><p>${purchasedProducts.length ? `${purchasedProducts.length} permanent unlock${purchasedProducts.length === 1 ? '' : 's'} available on this Apple account.` : 'Permanent unlocks will be restorable here when in-app purchases are released.'}</p><button class="secondary-button full" type="button" data-action="restore-purchases">Restore purchases</button></div>` : ''}
     <div class="panel-foot"><button class="secondary-button full" type="button" data-action="board">← Back to the job board</button></div>
   </main>`;
 }
@@ -455,11 +442,7 @@ function render(): void {
   else world.hideShipyard();
   if (phase === 'market') renderMarket();
   if (phase === 'map') renderMap();
-  if (phase === 'account') renderAccount();
-  if (phase === 'board' && deferredUser) {
-    const user = deferredUser; deferredUser = null;
-    queueMicrotask(() => { void connectAccount(user); });
-  }
+  if (phase === 'cloud') renderCloud();
 }
 
 function addJob(id: string): void {
@@ -696,38 +679,25 @@ function updateRun(dt: number): void {
 }
 
 function handleAction(action: string, id?: string, target?: HTMLElement): void {
-  if (action === 'account') { phase = 'account'; deleteConfirm = false; render(); }
-  else if (action === 'apple-sign-in') {
-    cloudState = 'Opening Apple sign-in…'; render();
-    void signInWithApple().then(user => user && connectAccount(user)).catch(error => {
-      cloudState = error instanceof Error ? error.message : String(error); render();
-    });
-  }
+  if (action === 'cloud') { phase = 'cloud'; render(); }
   else if (action === 'use-cloud' && pendingCloud) {
-    const chosen = pendingCloud; pendingCloud = null; cloudRevision = chosen.revision;
-    replaceSave(chosen.save_data); persist(save, saveKey); cloudState = 'Cloud progress restored';
-    notify('Cloud progress restored.', 'success');
+    const chosen = pendingCloud; rememberResolved(cloudRecords); pendingCloud = null;
+    replaceSave(chosen.save); persist(save); scheduleCloudSave(); cloudState = 'iCloud progress restored';
+    notify('iCloud progress restored.', 'success');
   }
   else if (action === 'use-device' && pendingCloud) {
-    cloudRevision = pendingCloud.revision; pendingCloud = null; requestCloudSync();
-    notify('Keeping this device’s progress.', 'success'); render();
+    rememberResolved(cloudRecords); pendingCloud = null; scheduleCloudSave();
+    cloudState = 'Keeping this device’s progress'; notify(cloudState, 'success'); phase = 'board'; render();
   }
-  else if (action === 'sync-now' && accountUser) { cloudState = 'Syncing…'; requestCloudSync(); render(); }
-  else if (action === 'sign-out') {
-    void signOut().then(() => {
-      accountUser = null; saveKey = GUEST_SAVE_KEY; cloudRevision = null; pendingCloud = null;
-      cloudState = 'Playing as guest'; replaceSave(loadSave()); notify('Signed out. Guest progress is ready.', 'success');
-    }).catch(error => notify(error instanceof Error ? error.message : String(error), 'danger'));
+  else if (action === 'sync-now') {
+    cloudState = 'Checking iCloud…'; render();
+    void readCloud().then(result => { cloudAvailable = result.available; evaluateCloud(result.records); if (phase === 'cloud') render(); })
+      .catch(error => { cloudState = error instanceof Error ? error.message : String(error); render(); });
   }
-  else if (action === 'ask-delete') { deleteConfirm = true; render(); }
-  else if (action === 'cancel-delete') { deleteConfirm = false; render(); }
-  else if (action === 'confirm-delete' && accountUser) {
-    const oldKey = saveKey; cloudState = 'Deleting account…'; render();
-    void deleteAccount().then(() => {
-      localStorage.removeItem(oldKey); accountUser = null; saveKey = GUEST_SAVE_KEY;
-      cloudRevision = null; pendingCloud = null; deleteConfirm = false; cloudState = 'Playing as guest';
-      replaceSave(loadSave()); notify('Account and cloud progress deleted.', 'success');
-    }).catch(error => { cloudState = error instanceof Error ? error.message : String(error); render(); });
+  else if (action === 'restore-purchases') {
+    void restorePurchases().then(products => {
+      purchasedProducts = products; render(); notify(products.length ? 'Purchases restored.' : 'No restorable purchases found.', products.length ? 'success' : 'info');
+    }).catch(error => { notify(error instanceof Error ? error.message : String(error), 'danger'); });
   }
   else if (action === 'add-job' && id) addJob(id);
   else if (action === 'remove-job' && id) removeJob(id);
@@ -875,8 +845,7 @@ window.addEventListener('keyup', event => {
 window.addEventListener('blur', () => { heldKeys.clear(); if (run) { run.holding = false; run.pointer = null; } sceneHost.classList.remove('steering'); });
 
 soundEl.addEventListener('click', () => { save.sound = !save.sound; saveProgress(); if (save.sound) beep(620); });
-accountButton.addEventListener('click', () => handleAction('account'));
-window.addEventListener('online', () => { if (accountUser && !pendingCloud) requestCloudSync(); });
+cloudButton.addEventListener('click', () => handleAction('cloud'));
 
 let previous = performance.now();
 function frame(now: number): void {
@@ -892,8 +861,17 @@ function frame(now: number): void {
 }
 
 render(); requestAnimationFrame(frame);
-void currentUser().then(user => {
-  if (!user) return;
-  if (phase === 'board' || phase === 'account') void connectAccount(user);
-  else deferredUser = user;
-}).catch(() => undefined);
+if (cloudSupported) {
+  void watchCloud(event => {
+    if (event.quotaExceeded) { cloudState = 'iCloud storage is full. Device progress is safe.'; if (phase === 'cloud') render(); return; }
+    void readCloud().then(result => { cloudAvailable = result.available; evaluateCloud(result.records); if (phase === 'cloud') render(); });
+  });
+  void readCloud().then(result => {
+    cloudAvailable = result.available;
+    cloudState = cloudAvailable ? 'Checking iCloud progress…' : 'Saved on this device';
+    evaluateCloud(result.records);
+    if (cloudAvailable && result.records.length === 0 && !hasProgress(save)) scheduleCloudSave();
+    if (phase === 'cloud') render();
+  }).catch(error => { cloudState = `iCloud unavailable: ${error instanceof Error ? error.message : String(error)}`; });
+  void currentEntitlements().then(products => { purchasedProducts = products; if (phase === 'cloud') render(); }).catch(() => undefined);
+}
