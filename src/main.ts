@@ -1,6 +1,8 @@
 import './style.css';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Share } from '@capacitor/share';
+import type { User } from '@supabase/supabase-js';
+import { accountConfigured, currentUser, deleteAccount, fetchCloudSave, signInWithApple, signOut, writeCloudSave, type CloudSave } from './account';
 import { World } from './world';
 import { advanceMotion } from './piloting';
 import { canDock, channelCenter, currentPush, destinationX, destinationZ, levelPlan, offshoreState, roughWaterPush, weatherPush, type LevelPlan } from './levels';
@@ -8,17 +10,17 @@ import { screenArrow } from './navigation';
 import { heardBySoundPatrol, inVisionCone, sightProfile } from './patrols';
 import {
   BOATS, PORTS, HARBORS, SHAPE_NAMES, canFitAll, canPlace, jobById, jobsForPort,
-  loadSave, occupiedCells, persist, rotatedCells, usableCells, isBlocked, boatUpgrade, repairCost, rareChance, specialOfferFor,
+  accountSaveKey, GUEST_SAVE_KEY, loadSave, occupiedCells, persist, rotatedCells, usableCells, isBlocked, boatUpgrade, repairCost, rareChance, specialOfferFor,
   harborRequirements, refreshHarborUnlocks, openHarbor, recordHarborDelivery, HARBOR_GATES, estimateCargoPay, voyageReceipt, boatTraits, impactDamage, conditionHandling, charterChallenge, completesChallenge,
   BACKUP_BOAT_INDEX, MIN_SEAWORTHY_CONDITION,
-  type Job, type Phase, type Piece,
+  type Job, type Phase, type Piece, type SaveData,
 } from './model';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `<div class="game-shell">
   <div id="scene" class="scene" aria-label="Colorful isometric harbour game scene"></div>
   <div class="scene-vignette"></div>
-  <header class="topbar"><div class="brand-mark" aria-hidden="true">◈</div><div class="brand"><strong>CRATE <span>ESCAPE</span></strong><small>PACK IT · RUN IT · DON'T GET CAUGHT</small></div><div class="topbar-right"><span id="cash" class="coin-pill"></span><button id="sound" class="icon-button" type="button" aria-label="Toggle sound"></button></div></header>
+  <header class="topbar"><div class="brand-mark" aria-hidden="true">◈</div><div class="brand"><strong>CRATE <span>ESCAPE</span></strong><small>PACK IT · RUN IT · DON'T GET CAUGHT</small></div><div class="topbar-right"><button id="account-button" class="account-button" type="button">Guest</button><span id="cash" class="coin-pill"></span><button id="sound" class="icon-button" type="button" aria-label="Toggle sound"></button></div></header>
   <div id="view"></div>
   <div id="damage-flash" class="damage-flash" aria-hidden="true"></div>
   <div id="damage-callout" class="damage-callout" role="status" aria-live="polite"></div>
@@ -33,8 +35,18 @@ const damageFlashEl = document.querySelector<HTMLElement>('#damage-flash')!;
 const damageCalloutEl = document.querySelector<HTMLElement>('#damage-callout')!;
 const cashEl = document.querySelector<HTMLElement>('#cash')!;
 const soundEl = document.querySelector<HTMLButtonElement>('#sound')!;
+const accountButton = document.querySelector<HTMLButtonElement>('#account-button')!;
 const world = new World(sceneHost);
 const save = loadSave();
+let accountUser: User | null = null;
+let deferredUser: User | null = null;
+let saveKey = GUEST_SAVE_KEY;
+let cloudRevision: number | null = null;
+let cloudState = 'Playing as guest';
+let pendingCloud: CloudSave | null = null;
+let deleteConfirm = false;
+let syncRunning = false;
+let syncRequested = false;
 world.setBoat(BOATS[save.boat]);
 let currentPlan: LevelPlan = levelPlan(save.level, save.port);
 world.configureLevel(currentPlan);
@@ -91,10 +103,84 @@ function notify(message: string, tone: 'info' | 'success' | 'danger' = 'info'): 
   toastEl.textContent = message; toastEl.dataset.tone = tone; toastEl.classList.add('visible');
   window.clearTimeout(toastTimer); toastTimer = window.setTimeout(() => toastEl.classList.remove('visible'), 3200);
 }
-function saveProgress(): void { persist(save); updateChrome(); }
+function saveProgress(): void { persist(save, saveKey); updateChrome(); if (accountUser && !pendingCloud) requestCloudSync(); }
 function updateChrome(): void {
   cashEl.innerHTML = `<span aria-hidden="true">●</span> ${money(save.cash)}`;
   soundEl.innerHTML = save.sound ? '♪' : '♩'; soundEl.setAttribute('aria-label', save.sound ? 'Mute sound' : 'Turn on sound');
+  accountButton.textContent = accountUser ? '☻ Account' : '☻ Guest';
+  accountButton.disabled = phase === 'run';
+}
+
+function replaceSave(next: SaveData): void {
+  Object.assign(save, next);
+  jobs = []; pieces = []; selected = null; yardSelected = null; result = null; run = null;
+  currentPlan = levelPlan(save.level, save.port); world.configureLevel(currentPlan); world.setBoat(boat());
+  phase = 'board'; render();
+}
+
+function hasProgress(data: SaveData): boolean { return data.runs > 0 || data.ownedBoats.length > 2 || data.cash !== 80 || data.unlockedPorts.length > 1; }
+function saveSummary(data: SaveData): string { return `${data.runs} deliveries · ${data.ownedBoats.length} boats · ${data.unlockedPorts.length} ${data.unlockedPorts.length === 1 ? 'harbor' : 'harbors'} · ${money(data.cash)}`; }
+
+async function connectAccount(user: User): Promise<void> {
+  accountUser = user; saveKey = accountSaveKey(user.id); cloudState = 'Checking cloud progress…'; pendingCloud = null;
+  let accountLocalExists = false;
+  try { accountLocalExists = localStorage.getItem(saveKey) !== null; } catch { /* Storage can be unavailable in private mode. */ }
+  const candidate = accountLocalExists ? loadSave(saveKey) : loadSave(GUEST_SAVE_KEY);
+  try {
+    const cloud = await fetchCloudSave(user.id);
+    if (!cloud) {
+      replaceSave(candidate); persist(save, saveKey);
+      cloudRevision = null; requestCloudSync();
+    } else {
+      cloudRevision = cloud.revision;
+      if (hasProgress(candidate) && JSON.stringify(candidate) !== JSON.stringify(cloud.save_data)) {
+        pendingCloud = cloud; replaceSave(candidate); cloudState = 'Choose which progress to keep';
+      } else {
+        replaceSave(cloud.save_data); persist(save, saveKey); cloudState = 'Cloud progress is current';
+      }
+    }
+  } catch (error) {
+    replaceSave(candidate); cloudState = `Cloud unavailable: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  render();
+}
+
+function requestCloudSync(): void {
+  syncRequested = true;
+  if (syncRunning || !accountUser || pendingCloud) return;
+  syncRunning = true;
+  void (async () => {
+    while (syncRequested && accountUser && !pendingCloud) {
+      syncRequested = false;
+      const userId: string = accountUser.id;
+      const snapshot = structuredClone(save);
+      try {
+        const revision = await writeCloudSave(userId, snapshot, cloudRevision);
+        if (accountUser?.id !== userId) break;
+        cloudRevision = revision; cloudState = 'Progress saved to cloud';
+      } catch (error) {
+        if (accountUser?.id !== userId) break;
+        cloudState = error instanceof Error ? error.message : String(error);
+        try { pendingCloud = await fetchCloudSave(userId); } catch { /* Retry manually once online. */ }
+        if (pendingCloud) cloudState = 'Cloud progress changed. Choose which copy to keep.';
+        break;
+      }
+    }
+    syncRunning = false;
+    if (phase === 'account') render();
+  })();
+}
+
+function renderAccount(): void {
+  const name = accountUser?.user_metadata?.full_name || accountUser?.email || 'Apple account';
+  view.innerHTML = `<main class="side-panel account-panel" aria-label="Account and cloud save">
+    ${headerStep('YOUR CAPTAIN’S LOG', 'Account', 'Keep your fleet and voyages when you change devices.')}
+    <div class="account-status"><span class="eyebrow">${accountUser ? 'SIGNED IN WITH APPLE' : 'GUEST CAPTAIN'}</span><strong>${escapeHtml(accountUser ? name : 'Progress on this device')}</strong><p>${escapeHtml(cloudState)}</p></div>
+    <div class="account-save"><span class="eyebrow">CURRENT PROGRESS</span><strong>${saveSummary(save)}</strong></div>
+    ${pendingCloud ? `<div class="account-conflict"><strong>Two voyages found</strong><p>Choose the progress you want to keep. The other copy will be replaced.</p><div><span>This device</span><b>${saveSummary(save)}</b></div><div><span>Cloud</span><b>${saveSummary(pendingCloud.save_data)}</b></div><button class="primary-button full" type="button" data-action="use-cloud">Use cloud progress</button><button class="secondary-button full" type="button" data-action="use-device">Use this device</button></div>` : ''}
+    ${!accountUser ? `<p class="account-copy">Play freely as a guest. Sign in with Apple when you want to carry progress to another device.</p><button class="apple-button" type="button" data-action="apple-sign-in" ${accountConfigured ? '' : 'disabled'}>Sign in with Apple</button>${accountConfigured ? '' : '<p class="account-help">Apple sign-in is being prepared. Guest play is ready.</p>'}` : `<button class="secondary-button full" type="button" data-action="sync-now" ${pendingCloud ? 'disabled' : ''}>↻ Sync progress</button><button class="secondary-button full" type="button" data-action="sign-out">Sign out</button><div class="account-danger"><strong>Delete account</strong><p>Remove your Apple-linked account and cloud progress. This device’s guest progress stays available.</p>${deleteConfirm ? '<button class="delete-button" type="button" data-action="confirm-delete">Confirm permanent deletion</button><button class="text-button" type="button" data-action="cancel-delete">Cancel</button>' : '<button class="text-button" type="button" data-action="ask-delete">Delete my account…</button>'}</div>`}
+    <div class="panel-foot"><button class="secondary-button full" type="button" data-action="board">← Back to the job board</button></div>
+  </main>`;
 }
 
 function piecesForJob(job: Job): Piece[] {
@@ -369,6 +455,11 @@ function render(): void {
   else world.hideShipyard();
   if (phase === 'market') renderMarket();
   if (phase === 'map') renderMap();
+  if (phase === 'account') renderAccount();
+  if (phase === 'board' && deferredUser) {
+    const user = deferredUser; deferredUser = null;
+    queueMicrotask(() => { void connectAccount(user); });
+  }
 }
 
 function addJob(id: string): void {
@@ -605,7 +696,40 @@ function updateRun(dt: number): void {
 }
 
 function handleAction(action: string, id?: string, target?: HTMLElement): void {
-  if (action === 'add-job' && id) addJob(id);
+  if (action === 'account') { phase = 'account'; deleteConfirm = false; render(); }
+  else if (action === 'apple-sign-in') {
+    cloudState = 'Opening Apple sign-in…'; render();
+    void signInWithApple().then(user => user && connectAccount(user)).catch(error => {
+      cloudState = error instanceof Error ? error.message : String(error); render();
+    });
+  }
+  else if (action === 'use-cloud' && pendingCloud) {
+    const chosen = pendingCloud; pendingCloud = null; cloudRevision = chosen.revision;
+    replaceSave(chosen.save_data); persist(save, saveKey); cloudState = 'Cloud progress restored';
+    notify('Cloud progress restored.', 'success');
+  }
+  else if (action === 'use-device' && pendingCloud) {
+    cloudRevision = pendingCloud.revision; pendingCloud = null; requestCloudSync();
+    notify('Keeping this device’s progress.', 'success'); render();
+  }
+  else if (action === 'sync-now' && accountUser) { cloudState = 'Syncing…'; requestCloudSync(); render(); }
+  else if (action === 'sign-out') {
+    void signOut().then(() => {
+      accountUser = null; saveKey = GUEST_SAVE_KEY; cloudRevision = null; pendingCloud = null;
+      cloudState = 'Playing as guest'; replaceSave(loadSave()); notify('Signed out. Guest progress is ready.', 'success');
+    }).catch(error => notify(error instanceof Error ? error.message : String(error), 'danger'));
+  }
+  else if (action === 'ask-delete') { deleteConfirm = true; render(); }
+  else if (action === 'cancel-delete') { deleteConfirm = false; render(); }
+  else if (action === 'confirm-delete' && accountUser) {
+    const oldKey = saveKey; cloudState = 'Deleting account…'; render();
+    void deleteAccount().then(() => {
+      localStorage.removeItem(oldKey); accountUser = null; saveKey = GUEST_SAVE_KEY;
+      cloudRevision = null; pendingCloud = null; deleteConfirm = false; cloudState = 'Playing as guest';
+      replaceSave(loadSave()); notify('Account and cloud progress deleted.', 'success');
+    }).catch(error => { cloudState = error instanceof Error ? error.message : String(error); render(); });
+  }
+  else if (action === 'add-job' && id) addJob(id);
   else if (action === 'remove-job' && id) removeJob(id);
   else if (action === 'pack' && jobs.length) { phase = 'pack'; selected = pieces.find(piece => piece.x === null)?.id || null; render(); }
   else if (action === 'board') { phase = 'board'; render(); }
@@ -751,6 +875,8 @@ window.addEventListener('keyup', event => {
 window.addEventListener('blur', () => { heldKeys.clear(); if (run) { run.holding = false; run.pointer = null; } sceneHost.classList.remove('steering'); });
 
 soundEl.addEventListener('click', () => { save.sound = !save.sound; saveProgress(); if (save.sound) beep(620); });
+accountButton.addEventListener('click', () => handleAction('account'));
+window.addEventListener('online', () => { if (accountUser && !pendingCloud) requestCloudSync(); });
 
 let previous = performance.now();
 function frame(now: number): void {
@@ -766,3 +892,8 @@ function frame(now: number): void {
 }
 
 render(); requestAnimationFrame(frame);
+void currentUser().then(user => {
+  if (!user) return;
+  if (phase === 'board' || phase === 'account') void connectAccount(user);
+  else deferredUser = user;
+}).catch(() => undefined);

@@ -1,7 +1,7 @@
 import { HARBORS } from './harbors';
 export { HARBORS } from './harbors';
 
-export type Phase = 'board' | 'pack' | 'run' | 'result' | 'yard' | 'market' | 'map';
+export type Phase = 'board' | 'pack' | 'run' | 'result' | 'yard' | 'market' | 'map' | 'account';
 export type CargoKind = 'standard' | 'bulky' | 'hot' | 'perishable' | 'fragile' | 'vip';
 export type Cell = readonly [number, number];
 export type Shape = 'single' | 'domino' | 'line3' | 'square' | 'ell' | 'tee' | 'ess';
@@ -336,9 +336,12 @@ export function defaultSave(): SaveData {
   return { cash: 80, reputation: 0, boat: 0, ownedBoats: [0, BACKUP_BOAT_INDEX], port: 0, unlockedPorts: [0], boatUpgrades: { 0: { engine: 0, hull: 0 }, [BACKUP_BOAT_INDEX]: { engine: 0, hull: 0 } }, boatCondition: { 0: 100, [BACKUP_BOAT_INDEX]: 100 }, yardUpgrades: { repairBay: 0, brokerDesk: 0 }, runs: 0, level: 1, soundTutorialSeen: false, sound: true, harborRecords: {}, offerCycle: 0 };
 }
 
-export function loadSave(): SaveData {
+export const GUEST_SAVE_KEY = 'crate-escape-save-v1';
+export const accountSaveKey = (userId: string): string => `${GUEST_SAVE_KEY}:account:${userId}`;
+
+export function loadSave(key = GUEST_SAVE_KEY): SaveData {
   try {
-    const data = JSON.parse(localStorage.getItem('crate-escape-save-v1') || 'null') as (Partial<SaveData> & { upgrades?: BoatUpgrades }) | null;
+    const data = JSON.parse(localStorage.getItem(key) || 'null') as (Partial<SaveData> & { upgrades?: BoatUpgrades }) | null;
     if (!data || typeof data.cash !== 'number') return defaultSave();
     const initial = defaultSave();
     const selected = Number.isInteger(data.boat) && data.boat! >= 0 && data.boat! < BOATS.length ? data.boat! : 0;
@@ -371,6 +374,6 @@ export function loadSave(): SaveData {
   } catch { return defaultSave(); }
 }
 
-export function persist(data: SaveData): void {
-  try { localStorage.setItem('crate-escape-save-v1', JSON.stringify(data)); } catch { /* Private browsing can block storage. */ }
+export function persist(data: SaveData, key = GUEST_SAVE_KEY): void {
+  try { localStorage.setItem(key, JSON.stringify(data)); } catch { /* Private browsing can block storage. */ }
 }

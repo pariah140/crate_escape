@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite. The game saves progress in local storage. The iOS build bundles all game assets and needs no network connection for gameplay.
+Open the local URL printed by Vite. Guest play saves progress on the device and remains available offline. Optional Apple sign-in and cloud progress need the setup in [SIGN_IN_PLAN.md](SIGN_IN_PLAN.md).
 
 ## Controls
 
