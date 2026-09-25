@@ -13,7 +13,9 @@
 
 ## Design target
 
-Make the first purchase feel attainable, then make each region a meaningful set of voyages. Aim for **10–16 hours to chart all 25 harbours** for a typical player, with more time for a complete fleet and cosmetic collection. These are targets to measure, not a promise: real run time, failures, packing time and offer selection need telemetry before locking numbers.
+Make the first purchase feel attainable, then make each region a meaningful set of voyages. Aim for **10–16 hours to chart all 25 harbours** for a typical engaged player. This is the first campaign milestone, **not total game completion**. A full fleet, mastery medals and optional collections should give interested players roughly 25–40 hours of meaningful goals before the repeatable live cadence becomes their main reason to return. Those are design hypotheses to measure, not industry-standard completion times: real run time, failures, packing time and offer selection need telemetry before locking numbers.
+
+Mobile games are normally measured in short sessions and return visits rather than a fixed lifetime hour count. GameAnalytics' 2026 benchmark of 16,000+ mobile games reports a median 3.1–3.5 minute session and roughly 12 minutes of daily play for active players; these broad cross-genre figures are context, not a target for every Crate Escape player. Standard packing plus sailing should fit a few minutes, while longer voyages should be clearly marked special commissions. [GameAnalytics 2026 benchmarks](https://www.gameanalytics.com/cn/reports/2026-mobile-pc-gaming-benchmarks)
 
 Every harbour and every functional boat stays earnable without payment. A purchase can shorten a clearly stated task, buy a style variant, or add optional content. It must never be needed to repair a stranded player, and bought currency must never be spent by a single ambiguous tap during a run.
 
@@ -103,9 +105,11 @@ These are **net cash per successful run after routine service**, assuming a norm
 |---|---:|---:|
 | 1–5 | $110–$500 | 1–3 minutes per voyage |
 | 6–10 | $450–$800 | 2–4 minutes |
-| 11–15 | $700–$1,100 | 3–5 minutes |
-| 16–20 | $950–$1,400 | 4–6 minutes |
-| 21–25 | $1,250–$1,850 | 5–7 minutes |
+| 11–15 | $700–$1,100 | 2–4 minutes |
+| 16–20 | $950–$1,400 | 3–5 minutes |
+| 21–25 | $1,250–$1,850 | 3–5 minutes |
+
+Time includes the normal packing and sailing loop. A clearly labelled rare expedition may take 5–7 minutes; routine late voyages should gain challenge through route choices, hazards and cargo rather than length alone. If the 174-delivery gate creates fatigue in play tests, reduce the delivery counts before stretching trips or cash prices.
 
 Test a new save, a skilled player, a player with 20% failed runs, and one using only required boats. At each harbour, project wallet after its local delivery gate, fee, repairs and the next required boat. Tune payout and fees until the median player can afford the next boat near that gate; never tune by simply adding more forced repeats. Preserve enough early cash for a first mistake and repair.
 
@@ -133,6 +137,8 @@ Tag with Ryan's official store listings describe free runs, earned Suns and Pizz
 - Enjoyment: repeat failure after a new hazard, return rate after three voyages, route variety, use of old harbours, exit after seeing a price, accidental purchase/restore complaints.
 - Monetisation: purchaser conversion, refunded purchases, ad opt-in, token earn/spend balance, completion rate of free paths. Never optimize revenue while early completion or retention drops sharply.
 - Release only after simulated progression for all 25 gates, real play tests of the first two regions, and store sandbox tests including cancel, refund, interrupted purchase, reinstall and restore.
+
+The commercial question is whether players *return*, not whether a fast player can spend ten hours on a chart. Track day 1, day 7 and day 30 retention alongside actual median session length and time to each region. Give players layered reasons to return: one complete delivery in a short visit; a fleet or harbour goal across several visits; and rotating, handcrafted chart challenges, cosmetics or optional content across weeks. Infinite generated voyages provide replayability, but need distinct goals and variety so they do not feel like repeated tolls. GameAnalytics' latest report explicitly recommends loops at single-session, same-day and multi-day horizons; Unity's developer survey reports common use of daily missions and achievement challenges as retention tools. [GameAnalytics 2026 benchmarks](https://www.gameanalytics.com/cn/reports/2026-mobile-pc-gaming-benchmarks), [Unity Gaming Report 2025](https://gw-prd.hexagon.unity.com/resources/gaming-report-2025)
 
 ## Research basis
 
