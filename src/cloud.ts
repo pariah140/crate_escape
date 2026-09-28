@@ -2,8 +2,9 @@ import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor
 import { parseSave, type SaveData } from './model';
 
 export interface CloudRecord { deviceId: string; savedAt: number; save: SaveData }
-export interface TokenWallet { balance: number; discountedHarbors: number[] }
+export interface TokenWallet { balance: number; discountedHarbors: number[]; discountedBoats: number[] }
 export interface TokenProduct { id: string; amount: number; price: string }
+export interface PremiumProduct { id: string; price: string }
 interface NativeCloudRow { key: string; value: string }
 interface NativeCloudPlugin {
   readCloud(): Promise<{ available: boolean; records: NativeCloudRow[] }>;
@@ -14,8 +15,12 @@ interface NativeCloudPlugin {
   tokenWallet(): Promise<TokenWallet>;
   purchaseTokens(options: { productId: string }): Promise<{ status: 'purchased' | 'pending' | 'cancelled'; wallet?: TokenWallet }>;
   discountHarbor(options: { harbor: number }): Promise<{ wallet: TokenWallet }>;
+  discountBoat(options: { boat: number }): Promise<{ wallet: TokenWallet }>;
+  premiumProducts(): Promise<{ products: PremiumProduct[] }>;
+  purchasePremium(options: { productId: string }): Promise<{ status: 'purchased' | 'pending' | 'cancelled'; productIds?: string[] }>;
   addListener(eventName: 'cloudChanged', listener: (event: { quotaExceeded: boolean }) => void): Promise<PluginListenerHandle>;
   addListener(eventName: 'tokenWalletChanged', listener: (wallet: TokenWallet) => void): Promise<PluginListenerHandle>;
+  addListener(eventName: 'premiumChanged', listener: (event: { productIds: string[] }) => void): Promise<PluginListenerHandle>;
 }
 
 const native = registerPlugin<NativeCloudPlugin>('CrateNative');
@@ -85,6 +90,26 @@ export async function purchaseTokenPack(productId: string): Promise<{ status: 'p
 export async function buyHarborDiscount(harbor: number): Promise<TokenWallet> {
   if (!cloudSupported) throw new Error('Chart Tokens are available in the iOS app.');
   return (await native.discountHarbor({ harbor })).wallet;
+}
+
+export async function buyBoatDiscount(boat: number): Promise<TokenWallet> {
+  if (!cloudSupported) throw new Error('Chart Tokens are available in the iOS app.');
+  return (await native.discountBoat({ boat })).wallet;
+}
+
+export async function readPremiumProducts(): Promise<PremiumProduct[]> {
+  if (!cloudSupported) return [];
+  return (await native.premiumProducts()).products;
+}
+
+export async function purchasePremiumProduct(productId: string): Promise<{ status: 'purchased' | 'pending' | 'cancelled'; productIds?: string[] }> {
+  if (!cloudSupported) throw new Error('Purchases are available in the iOS app.');
+  return native.purchasePremium({ productId });
+}
+
+export async function watchPremium(onChange: (productIds: string[]) => void): Promise<PluginListenerHandle | null> {
+  if (!cloudSupported) return null;
+  return native.addListener('premiumChanged', event => onChange(event.productIds));
 }
 
 export async function watchTokenWallet(onChange: (wallet: TokenWallet) => void): Promise<PluginListenerHandle | null> {

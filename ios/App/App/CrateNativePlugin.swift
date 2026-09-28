@@ -7,25 +7,38 @@ private struct TokenWallet: Codable {
     var grants: [String: Int] = [:]
     var refunds: [String: Int] = [:]
     var harborDiscounts: [String: Int] = [:]
+    var boatDiscounts: [String: Int] = [:]
+
+    init() {}
+    private enum CodingKeys: String, CodingKey { case grants, refunds, harborDiscounts, boatDiscounts }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        grants = try values.decode([String: Int].self, forKey: .grants)
+        refunds = try values.decode([String: Int].self, forKey: .refunds)
+        harborDiscounts = try values.decode([String: Int].self, forKey: .harborDiscounts)
+        boatDiscounts = try values.decodeIfPresent([String: Int].self, forKey: .boatDiscounts) ?? [:]
+    }
 
     var balance: Int {
-        max(0, grants.values.reduce(0, +) - refunds.values.reduce(0, +) - harborDiscounts.values.reduce(0, +))
+        max(0, grants.values.reduce(0, +) - refunds.values.reduce(0, +) - harborDiscounts.values.reduce(0, +) - boatDiscounts.values.reduce(0, +))
     }
     var payload: [String: Any] {
-        ["balance": balance, "discountedHarbors": harborDiscounts.keys.compactMap(Int.init).sorted()]
+        ["balance": balance, "discountedHarbors": harborDiscounts.keys.compactMap(Int.init).sorted(), "discountedBoats": boatDiscounts.keys.compactMap(Int.init).sorted()]
     }
 }
 
 private enum WalletFailure: LocalizedError {
-    case noICloud, insufficientTokens, invalidHarbor, conflict, corruptWallet, invalidPurchase
+    case noICloud, insufficientTokens, invalidHarbor, invalidBoat, conflict, corruptWallet, invalidPurchase, deliveryPending
     var errorDescription: String? {
         switch self {
         case .noICloud: return "Sign in to iCloud to use Chart Tokens. No purchase was made."
         case .insufficientTokens: return "Not enough Chart Tokens for this harbour chart."
         case .invalidHarbor: return "This harbour chart is unavailable."
+        case .invalidBoat: return "This boat chart is unavailable."
         case .conflict: return "Your iCloud wallet changed. Please try again."
         case .corruptWallet: return "Your iCloud wallet could not be read. Contact support before buying tokens."
         case .invalidPurchase: return "The App Store purchase could not be verified."
+        case .deliveryPending: return "Payment may have completed. Your tokens will arrive when iCloud reconnects. Check your wallet again later."
         }
     }
 }
@@ -107,6 +120,19 @@ private actor TokenWalletStore {
             return true
         }
     }
+
+    func discount(boat: Int) async throws -> [String: Any] {
+        let prices = [0, 750, 2200, 6800, 14500, 950, 4200, 8200, 10500, 28000]
+        guard (1..<prices.count).contains(boat) else { throw WalletFailure.invalidBoat }
+        let cost = max(5, (prices[boat] + 299) / 300)
+        return try await change { wallet in
+            let key = String(boat)
+            if wallet.boatDiscounts[key] != nil { return false }
+            guard wallet.balance >= cost else { throw WalletFailure.insufficientTokens }
+            wallet.boatDiscounts[key] = cost
+            return true
+        }
+    }
 }
 
 @objc(CrateNativePlugin)
@@ -121,7 +147,10 @@ public class CrateNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "tokenProducts", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "tokenWallet", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "purchaseTokens", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "discountHarbor", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "discountHarbor", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "discountBoat", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "premiumProducts", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "purchasePremium", returnType: CAPPluginReturnPromise)
     ]
 
     private let store = NSUbiquitousKeyValueStore.default
@@ -134,6 +163,13 @@ public class CrateNativePlugin: CAPPlugin, CAPBridgedPlugin {
         "com.pariah140.crateescape.charttokens30": 30,
         "com.pariah140.crateescape.charttokens90": 90,
         "com.pariah140.crateescape.charttokens220": 220
+    ]
+    private static let welcomeID = "com.pariah140.crateescape.welcomeaboard"
+    private static let premiumIDs: Set<String> = [
+        welcomeID,
+        "com.pariah140.crateescape.paint.coral",
+        "com.pariah140.crateescape.paint.moon",
+        "com.pariah140.crateescape.yard.festival"
     ]
 
     @objc override public func load() {
@@ -198,6 +234,7 @@ public class CrateNativePlugin: CAPPlugin, CAPBridgedPlugin {
         Task {
             do {
                 try await AppStore.sync()
+                try? await reconcileWelcome()
                 call.resolve(["productIds": await entitlementIds()])
             } catch {
                 call.reject("Could not restore purchases: \(error.localizedDescription)")
@@ -229,7 +266,7 @@ public class CrateNativePlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func tokenWallet(_ call: CAPPluginCall) {
         Task {
-            do { call.resolve(try await wallet.snapshot()) }
+            do { try await reconcileWelcome(); call.resolve(try await wallet.snapshot()) }
             catch { call.reject(error.localizedDescription) }
         }
     }
@@ -250,7 +287,9 @@ public class CrateNativePlugin: CAPPlugin, CAPBridgedPlugin {
                 switch try await product.purchase() {
                 case .success(let result):
                     guard case .verified(let transaction) = result else { throw WalletFailure.invalidPurchase }
-                    let snapshot = try await deliver(transaction)
+                    let snapshot: [String: Any]
+                    do { snapshot = try await deliver(transaction) }
+                    catch { throw WalletFailure.deliveryPending }
                     call.resolve(["status": "purchased", "wallet": snapshot])
                 case .pending: call.resolve(["status": "pending"])
                 case .userCancelled: call.resolve(["status": "cancelled"])
@@ -271,6 +310,75 @@ public class CrateNativePlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    @objc func discountBoat(_ call: CAPPluginCall) {
+        guard let boat = call.getInt("boat") else { call.reject("Missing boat"); return }
+        Task {
+            do {
+                let snapshot = try await wallet.discount(boat: boat)
+                call.resolve(["wallet": snapshot])
+                notifyListeners("tokenWalletChanged", data: snapshot)
+            } catch { call.reject(error.localizedDescription) }
+        }
+    }
+
+    @objc func premiumProducts(_ call: CAPPluginCall) {
+        Task {
+            do {
+                let products = try await Product.products(for: Array(Self.premiumIDs))
+                call.resolve(["products": products.compactMap { product -> [String: Any]? in
+                    guard Self.premiumIDs.contains(product.id), product.type == .nonConsumable else { return nil }
+                    return ["id": product.id, "price": product.displayPrice]
+                }])
+            } catch { call.reject("Could not load App Store prices: \(error.localizedDescription)") }
+        }
+    }
+
+    @objc func purchasePremium(_ call: CAPPluginCall) {
+        guard let id = call.getString("productId"), Self.premiumIDs.contains(id) else { call.reject("Unknown purchase"); return }
+        Task {
+            do {
+                if id == Self.welcomeID { _ = try await wallet.snapshot() }
+                guard let product = try await Product.products(for: [id]).first, product.type == .nonConsumable else {
+                    call.reject("This purchase is not available in the App Store yet")
+                    return
+                }
+                switch try await product.purchase() {
+                case .success(let result):
+                    guard case .verified(let transaction) = result else { throw WalletFailure.invalidPurchase }
+                    do { try await deliverPremium(transaction) }
+                    catch { throw WalletFailure.deliveryPending }
+                    call.resolve(["status": "purchased", "productIds": await entitlementIds()])
+                case .pending: call.resolve(["status": "pending"])
+                case .userCancelled: call.resolve(["status": "cancelled"])
+                @unknown default: call.resolve(["status": "pending"])
+                }
+            } catch { call.reject(error.localizedDescription) }
+        }
+    }
+
+    private func deliverPremium(_ transaction: Transaction) async throws {
+        guard transaction.appBundleID == Bundle.main.bundleIdentifier,
+              transaction.productType == .nonConsumable,
+              Self.premiumIDs.contains(transaction.productID) else { throw WalletFailure.invalidPurchase }
+        if transaction.productID == Self.welcomeID {
+            let snapshot = transaction.revocationDate == nil
+                ? try await wallet.grant(transactionID: String(transaction.id), amount: 30)
+                : try await wallet.refund(transactionID: String(transaction.id))
+            notifyListeners("tokenWalletChanged", data: snapshot)
+        }
+        await transaction.finish()
+        notifyListeners("premiumChanged", data: ["productIds": await entitlementIds()])
+    }
+
+    private func reconcileWelcome() async throws {
+        for await result in Transaction.currentEntitlements {
+            guard case .verified(let transaction) = result,
+                  transaction.productID == Self.welcomeID, transaction.revocationDate == nil else { continue }
+            let snapshot = try await wallet.grant(transactionID: String(transaction.id), amount: 30)
+            notifyListeners("tokenWalletChanged", data: snapshot)
+        }
+    }
+
     private func deliver(_ transaction: Transaction) async throws -> [String: Any] {
         guard transaction.appBundleID == Bundle.main.bundleIdentifier,
               transaction.productType == .consumable,
@@ -288,9 +396,9 @@ public class CrateNativePlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func recover(_ result: VerificationResult<Transaction>) async {
-        guard case .verified(let transaction) = result,
-              Self.tokenPacks[transaction.productID] != nil else { return }
+        guard case .verified(let transaction) = result else { return }
         // On iCloud failure the transaction remains unfinished and is retried next launch.
-        _ = try? await deliver(transaction)
+        if Self.tokenPacks[transaction.productID] != nil { _ = try? await deliver(transaction) }
+        else if Self.premiumIDs.contains(transaction.productID) { try? await deliverPremium(transaction) }
     }
 }

@@ -21,7 +21,18 @@ The iOS app now has a StoreKit 2 purchase flow for three consumable packs. It re
 | `com.pariah140.crateescape.charttokens90` | 90 |
 | `com.pariah140.crateescape.charttokens220` | 220 |
 
-Choose and approve the real-money prices in App Store Connect. Chart Tokens can buy a permanent 50% outfitting discount for one locked harbour, starting with harbour 3. The token price is at least 5 and otherwise one token per $200 of the harbour's original outfitting fee, rounded up. This does not waive the delivery, cargo variety, clean-run or boat-hold requirements. The discount is displayed and confirmed before tokens are spent.
+Choose and approve the real-money prices in App Store Connect. Chart Tokens can buy a permanent 50% cash discount for one locked harbour or one unowned boat. Harbour charts begin with harbour 3 and cost at least 5 tokens, otherwise one token per $200 of the original outfitting fee, rounded up. Boat charts cost at least 5 tokens, otherwise one per $300 of the original boat price, rounded up. These discounts do not waive any delivery, cargo variety, clean-run or hold requirements, and no boat handling, ability or hold is exclusive to payment. The cost and effect are displayed with a second confirmation before tokens are spent.
+
+The iOS store also supports these **Non-Consumable** products, subject to App Store Connect configuration:
+
+| Product ID | Permanent content |
+| --- | --- |
+| `com.pariah140.crateescape.welcomeaboard` | Exclusive Harbour Festival boat paint and a once-only grant of 30 Chart Tokens |
+| `com.pariah140.crateescape.paint.coral` | Coral Sunset boat paint |
+| `com.pariah140.crateescape.paint.moon` | Moonlit Tide boat paint |
+| `com.pariah140.crateescape.yard.festival` | Festival Dockyard theme |
+
+Purchased paints recolour the fleet's hulls and sails and add a pennant and accent stripe. The dockyard theme changes its concrete, workshop trim and bunting. Players equip owned looks in the shipyard. StoreKit entitlements determine ownership, while the selected look travels with the existing voyage save. If an entitlement is revoked, the app uses the original look. The Welcome Aboard token grant is recorded by verified transaction ID in the same CloudKit wallet, so restoring or reinstalling does not grant it twice.
 
 The token wallet is one record in the player's **private CloudKit database**, independent of the selectable game save. It records each verified StoreKit transaction ID once, each refunded grant once, and each harbour discount once. Its balance is derived from these records. CloudKit change tags reject a stale write so simultaneous devices reload and retry instead of silently overwriting a spend. The app finishes a consumable StoreKit transaction only after CloudKit confirms the grant. It listens to new and unfinished transactions on launch; an iCloud failure leaves the purchase unfinished for later recovery. Purchasing or spending tokens requires a working iCloud account and network connection. Harbours can still be opened at their full game-cash fee without iCloud. The browser build keeps its free game progress but offers no App Store purchases.
 
@@ -30,9 +41,9 @@ The existing **Restore permanent purchases** button checks StoreKit current enti
 ### Apple Developer and release setup
 
 1. Enable **iCloud Key-value storage and CloudKit** for `com.pariah140.crateescape`. Register `iCloud.com.pariah140.crateescape` and confirm the Xcode entitlements match the App ID. Configure In-App Purchase for the App ID as well.
-2. Create the three consumable products above in App Store Connect, with localisation, prices and review assets. Sign the build with the correct team.
+2. Create the three consumable and four non-consumable products above in App Store Connect, with localisation, prices and review assets. Sign the build with the correct team. Pick real-money prices only after checking the complete offers in a sandbox build.
 3. In the CloudKit development environment, create a wallet by using a sandbox purchase, then deploy the `CrateTokenWallet` record type and `payload` field schema to production before release.
-4. Test on two physical iOS devices with the same iCloud account: successful purchase, cancellation, Ask to Buy, app termination between payment and grant, delayed iCloud access, simultaneous discount attempts, refund, reinstall and recovery. Confirm that choosing either voyage save leaves the token wallet unchanged.
+4. Test on two physical iOS devices with the same iCloud account: token packs and Welcome Aboard purchase, cancellation, Ask to Buy, app termination between payment and grant, delayed iCloud access, simultaneous discount attempts, refund, reinstall and recovery. Verify that permanent looks restore, the 30-token bundle grant is counted once, and choosing either voyage save leaves the token wallet unchanged.
 5. Submit the IAP products and app together for App Review. Paid tokens are not ready for sale until the signed build and sandbox scenarios pass.
 
 ## Technical notes

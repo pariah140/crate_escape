@@ -1,7 +1,8 @@
 import './style.css';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Share } from '@capacitor/share';
-import { cloudSupported, cloudDeviceId, readCloud, writeCloudSave, watchCloud, currentEntitlements, restorePurchases, readTokenProducts, readTokenWallet, purchaseTokenPack, buyHarborDiscount, watchTokenWallet, type CloudRecord, type TokenProduct, type TokenWallet } from './cloud';
+import { cloudSupported, cloudDeviceId, readCloud, writeCloudSave, watchCloud, currentEntitlements, restorePurchases, readTokenProducts, readTokenWallet, purchaseTokenPack, buyHarborDiscount, buyBoatDiscount, readPremiumProducts, purchasePremiumProduct, watchPremium, watchTokenWallet, type CloudRecord, type TokenProduct, type TokenWallet, type PremiumProduct } from './cloud';
+import { PREMIUM_PRODUCTS, PAINTS, ownsPaint, ownsYardTheme, boatChartCost, chartedBoatPrice, type PaintId, type YardThemeId } from './premium';
 import { incomingCloudRecord } from './cloud-policy';
 import { World } from './world';
 import { advanceMotion } from './piloting';
@@ -46,9 +47,11 @@ let cloudRecords: CloudRecord[] = [];
 let purchasedProducts: string[] = [];
 let tokenWallet: TokenWallet | null = null;
 let tokenProducts: TokenProduct[] = [];
+let premiumProducts: PremiumProduct[] = [];
 let tokenError = '';
 let tokenBusy = false;
 let confirmDiscountHarbor: number | null = null;
+let confirmDiscountBoat: number | null = null;
 let syncTimer = 0;
 world.setBoat(BOATS[save.boat]);
 let currentPlan: LevelPlan = levelPlan(save.level, save.port);
@@ -80,6 +83,8 @@ let audioContext: AudioContext | null = null;
 const heldKeys = new Set<string>();
 
 const boat = () => BOATS[save.boat];
+const equippedPaint = (): PaintId => ownsPaint(save.paint, purchasedProducts) ? save.paint : 'original';
+const equippedYard = (): YardThemeId => ownsYardTheme(save.yardTheme, purchasedProducts) ? save.yardTheme : 'working';
 const holdWidth = () => boat().width;
 const holdHeight = () => boat().height;
 const holdCapacity = () => usableCells(boat());
@@ -120,7 +125,7 @@ function updateChrome(): void {
 function replaceSave(next: SaveData): void {
   Object.assign(save, next);
   jobs = []; pieces = []; selected = null; yardSelected = null; result = null; run = null;
-  currentPlan = levelPlan(save.level, save.port); world.configureLevel(currentPlan); world.setBoat(boat());
+  currentPlan = levelPlan(save.level, save.port); world.configureLevel(currentPlan); world.setBoat(boat(), equippedPaint());
   phase = 'board'; render();
 }
 
@@ -167,6 +172,32 @@ function showTokenWallet(wallet: TokenWallet): void {
   tokenWallet = wallet; tokenError = '';
   if (phase === 'cloud' || phase === 'map') render();
 }
+function applyEntitlements(ids: string[]): void {
+  purchasedProducts = ids;
+  if (phase !== 'run') world.setBoat(boat(), equippedPaint());
+  if (phase !== 'run') render();
+}
+async function purchasePremium(id: string): Promise<void> {
+  if (tokenBusy || purchasedProducts.includes(id) || !premiumProducts.some(product => product.id === id)) return;
+  tokenBusy = true; render();
+  try {
+    const result = await purchasePremiumProduct(id);
+    if (result.productIds) applyEntitlements(result.productIds);
+    if (result.status === 'purchased') { await refreshTokenWallet(); notify(`${PREMIUM_PRODUCTS.find(item => item.id === id)?.name ?? 'Purchase'} is ready in the shipyard.`, 'success'); }
+    else if (result.status === 'pending') notify('Purchase pending. It will appear after Apple approves it.');
+  } catch (error) { notify(error instanceof Error ? error.message : String(error), 'danger'); }
+  finally { tokenBusy = false; if (phase !== 'run') render(); }
+}
+async function purchaseBoatDiscount(index: number): Promise<void> {
+  if (tokenBusy || !tokenWallet || !Number.isInteger(index) || index <= 0 || index >= BACKUP_BOAT_INDEX || save.ownedBoats.includes(index)) return;
+  tokenBusy = true; render();
+  try {
+    showTokenWallet(await buyBoatDiscount(index));
+    confirmDiscountBoat = null;
+    notify(`${BOATS[index].name} now has a half-price cash chart.`, 'success');
+  } catch (error) { notify(error instanceof Error ? error.message : String(error), 'danger'); }
+  finally { tokenBusy = false; if (phase === 'market') render(); }
+}
 async function refreshTokenWallet(): Promise<void> {
   try { showTokenWallet(await readTokenWallet()); }
   catch (error) {
@@ -190,7 +221,7 @@ async function purchaseTokens(productId: string): Promise<void> {
 }
 
 async function purchaseHarborDiscount(index: number): Promise<void> {
-  if (tokenBusy || !tokenWallet || !Number.isInteger(index) || index < 2 || index >= HARBORS.length) return;
+  if (tokenBusy || !tokenWallet || !Number.isInteger(index) || index < 2 || index >= HARBORS.length || save.unlockedPorts.includes(index)) return;
   tokenBusy = true; render();
   try {
     showTokenWallet(await buyHarborDiscount(index));
@@ -202,18 +233,22 @@ async function purchaseHarborDiscount(index: number): Promise<void> {
 }
 
 function renderCloud(): void {
+  const previousScroll = view.querySelector<HTMLElement>('.cloud-panel')?.scrollTop ?? 0;
   view.innerHTML = `<main class="side-panel cloud-panel" aria-label="Save and purchases">
     ${headerStep('YOUR CAPTAIN’S LOG', 'Save progress', 'Your voyages stay on this device and can travel with iCloud on iPhone.')}
     <div class="cloud-status"><span class="eyebrow">${cloudAvailable ? 'ICLOUD AVAILABLE' : cloudSupported ? 'ICLOUD UNAVAILABLE' : 'BROWSER SAVE'}</span><strong>${escapeHtml(cloudState)}</strong><p>${cloudAvailable ? 'Your iCloud account carries progress between Apple devices.' : cloudSupported ? 'Check that iCloud is enabled for this app. Your device save remains safe.' : 'This browser keeps its own local progress.'}</p></div>
     <div class="cloud-save"><span class="eyebrow">CURRENT PROGRESS</span><strong>${saveSummary(save)}</strong></div>
     ${pendingCloud ? `<div class="cloud-conflict"><strong>Two voyages found</strong><p>Choose the progress to continue with. Nothing changes until you choose.</p><div><span>This device</span><b>${saveSummary(save)}</b></div><div><span>iCloud</span><b>${saveSummary(pendingCloud.save)}</b></div><button class="primary-button full" type="button" data-action="use-cloud">Use iCloud progress</button><button class="secondary-button full" type="button" data-action="use-device">Keep this device</button></div>` : ''}
     ${cloudAvailable && !pendingCloud ? '<button class="secondary-button full" type="button" data-action="sync-now">↻ Check iCloud now</button>' : ''}
-    ${cloudSupported ? `<div class="cloud-purchases"><span class="eyebrow">CHART TOKEN WALLET</span><strong>${tokenWallet ? `${tokenWallet.balance} Chart Tokens` : 'Checking iCloud wallet…'}</strong><p>Tokens can halve a harbour's outfitting fee. Delivery and boat requirements still apply. Your token wallet is separate from the voyage save.</p>${tokenError ? `<p class="token-error" role="alert">${escapeHtml(tokenError)}</p>` : ''}
+    ${cloudSupported ? `<div class="cloud-purchases"><span class="eyebrow">CHART TOKEN WALLET</span><strong>${tokenWallet ? `${tokenWallet.balance} Chart Tokens` : tokenError ? 'Wallet unavailable' : 'Checking iCloud wallet…'}</strong><p>Tokens can halve one harbour's outfitting fee or one boat's cash price. All boats and harbours remain earnable. Your token wallet is separate from the voyage save.</p>${tokenError ? `<p class="token-error" role="alert">${escapeHtml(tokenError)}</p>` : ''}
       <div class="token-packs">${tokenProducts.length ? tokenProducts.map(product => `<div class="token-pack"><span><b>${product.amount} tokens</b><small>${escapeHtml(product.price)}</small></span><button class="primary-button" type="button" data-action="buy-tokens" data-id="${escapeHtml(product.id)}" ${tokenBusy || !tokenWallet ? 'disabled' : ''}>Buy · ${escapeHtml(product.price)}</button></div>`).join('') : '<p>Token packs will appear when they are available in the App Store.</p>'}</div>
+      <div class="store-divider"><span class="eyebrow">BOAT & DOCKYARD COLLECTION</span><p>Permanent looks. Boat handling and cargo space stay the same.</p></div>
+      <div class="premium-list">${PREMIUM_PRODUCTS.map(item => { const product = premiumProducts.find(offer => offer.id === item.id); const owned = purchasedProducts.includes(item.id); const accent = item.id.includes('moon') ? PAINTS.moon.color : item.id.includes('coral') ? PAINTS.coral.color : item.kind === 'yard' ? '#efb364' : PAINTS.festival.color; return `<div class="premium-item"><span class="premium-swatch ${item.kind === 'yard' ? 'is-yard' : ''}" style="--swatch:${accent}" aria-hidden="true"><i></i></span><div><strong>${item.name}</strong><p>${item.detail}</p></div>${owned ? '<span class="premium-owned">Owned ✓</span>' : product ? `<button class="primary-button" type="button" data-action="buy-premium" data-id="${item.id}" ${tokenBusy || (item.kind === 'bundle' && !tokenWallet) ? 'disabled' : ''}>Buy · ${escapeHtml(product.price)}</button>` : '<small>Coming to App Store</small>'}</div>`; }).join('')}</div>
       <button class="secondary-button full" type="button" data-action="refresh-wallet" ${tokenBusy ? 'disabled' : ''}>↻ Check token wallet</button>
-      <button class="text-button" type="button" data-action="restore-purchases">Restore permanent purchases</button>${purchasedProducts.length ? `<p>${purchasedProducts.length} permanent unlock${purchasedProducts.length === 1 ? '' : 's'} restored.</p>` : ''}</div>` : ''}
-    <div class="panel-foot"><button class="secondary-button full" type="button" data-action="board">← Back to the job board</button></div>
+      <button class="text-button" type="button" data-action="restore-purchases">Restore permanent purchases</button>${purchasedProducts.length ? `<p>${purchasedProducts.length} permanent look${purchasedProducts.length === 1 ? '' : 's'} available.</p>` : ''}</div>` : ''}
+    <div class="panel-foot"><button class="secondary-button full" type="button" data-action="yard">Open shipyard customisation →</button><button class="secondary-button full" type="button" data-action="board">← Back to the job board</button></div>
   </main>`;
+  view.querySelector<HTMLElement>('.cloud-panel')!.scrollTop = previousScroll;
 }
 
 function piecesForJob(job: Job): Piece[] {
@@ -350,7 +385,7 @@ function holdDiagram(index: number): string {
   return `<span class="yard-hold" style="--hold-cols:${craft.width}" aria-label="${usableCells(craft)} usable cargo cells in a ${craft.width} by ${craft.height} hold">${Array.from({ length: craft.width * craft.height }, (_, i) => `<i class="${isBlocked(i % craft.width, Math.floor(i / craft.width), craft.blocked) ? 'hull-wall' : ''}"></i>`).join('')}</span>`;
 }
 
-function boatIcon(index: number): string {
+function boatIcon(index: number, painted = false): string {
   const craft = BOATS[index];
   const contours = ['0,3 17,0 48,3 63,14 48,25 17,28 0,25', '0,11 15,3 46,0 67,14 46,28 15,25', '0,4 13,0 53,0 70,14 53,28 13,28 0,24', '0,9 12,1 56,0 72,14 56,28 12,27', '0,5 12,1 64,1 76,14 64,27 12,27 0,23', '0,12 19,5 51,3 73,14 51,25 19,23', '1,7 18,2 57,2 74,14 57,26 18,26 1,21', '0,5 13,1 60,1 73,14 60,27 13,27 0,23', '0,13 26,2 58,1 78,14 58,27 26,26', '0,3 13,1 66,1 80,14 66,27 13,27 0,25', '0,11 17,3 46,3 64,14 46,25 17,25'];
   const fittings = [
@@ -366,7 +401,7 @@ function boatIcon(index: number): string {
     '<rect x="13" y="4" width="18" height="9" rx="1" fill="#90bda4"/><rect x="34" y="4" width="21" height="9" rx="1" fill="#e4b482"/><rect x="13" y="15" width="20" height="9" rx="1" fill="#a7a8ce"/><rect x="36" y="15" width="21" height="9" rx="1" fill="#f0cf8c"/>',
     '<path d="M15 14h41" stroke="#9b7151" stroke-width="2"/><path d="M33 14L49 3v11z" fill="#fff8e4"/><path d="M34 15L23 24V15z" fill="#e7a578"/><circle cx="13" cy="14" r="2" fill="#f6d397"/>',
   ];
-  return `<svg class="yard-silhouette" viewBox="-2 -2 82 32" aria-hidden="true"><polygon points="${contours[index]}" transform="translate(0 2)" fill="#31576c" opacity=".35"/><polygon points="${contours[index]}" fill="${craft.color}" stroke="#31576c" stroke-width="2"/>${fittings[index]}</svg>`;
+  return `<svg class="yard-silhouette" viewBox="-2 -2 82 32" aria-hidden="true"><polygon points="${contours[index]}" transform="translate(0 2)" fill="#31576c" opacity=".35"/><polygon points="${contours[index]}" fill="${painted && equippedPaint() !== 'original' ? PAINTS[equippedPaint() as Exclude<PaintId, 'original'>].color : craft.color}" stroke="#31576c" stroke-width="2"/>${fittings[index]}</svg>`;
 }
 
 function renderYard(): void {
@@ -385,7 +420,7 @@ function renderYard(): void {
     const active = save.boat === index;
     const state = save.boatCondition[index] ?? 100;
     return `<article class="fleet-card ${active ? 'active' : ''} ${inspected === index ? 'inspected' : ''}">
-      <div class="fleet-card-top">${boatIcon(index)}<div><span class="eyebrow">${active ? 'ACTIVE BOAT' : owned ? 'IN YOUR FLEET' : 'NEW BOAT'}</span><h3>${craft.name}</h3><p>${craft.description}</p></div></div>
+      <div class="fleet-card-top">${boatIcon(index, true)}<div><span class="eyebrow">${active ? 'ACTIVE BOAT' : owned ? 'IN YOUR FLEET' : 'NEW BOAT'}</span><h3>${craft.name}</h3><p>${craft.description}</p></div></div>
       <div class="fleet-card-bottom">${holdDiagram(index)}<div class="fleet-facts"><span><strong>${usableCells(craft)}</strong> cargo cells</span><span><strong>${Math.round(craft.speed * 100)}%</strong> speed · ${craft.handling}</span><span><strong>${craft.hull}</strong> hull · ${owned ? `${state}% condition` : `${money(craft.price)} to buy`}</span></div></div><div class="boat-ability"><strong>✦ ${craft.ability}</strong><span>${craft.abilityDetail}</span></div>
       <button class="secondary-button" type="button" data-action="inspect-boat" data-id="${index}" aria-label="Inspect ${craft.name}">${inspected === index ? 'Viewing boat ✓' : 'Inspect boat ↗'}</button>
     </article>`;
@@ -396,6 +431,9 @@ function renderYard(): void {
     <div class="yard-destinations"><button class="secondary-button" type="button" data-action="market">Browse all ${BOATS.length} boats →</button><button class="secondary-button" type="button" data-action="map">Open harbor map →</button></div>
     <div class="section-heading"><span>YOUR FLEET & BOATYARD</span><span>${save.ownedBoats.length}/${BOATS.length} OWNED</span></div>
     <div class="fleet-list">${cards}</div>
+    <div class="section-heading"><span>PAINT & DOCKYARD</span><span>LOOKS ONLY · NO STAT CHANGES</span></div>
+    <div class="yard-customise"><strong>Paint every boat</strong><div class="paint-options">${(['original', 'festival', 'coral', 'moon'] as PaintId[]).map(paint => { const owned = ownsPaint(paint, purchasedProducts); const label = paint === 'original' ? 'Original colours' : PAINTS[paint].label; const color = paint === 'original' ? '#ff8557' : PAINTS[paint].color; return `<button class="paint-choice ${equippedPaint() === paint ? 'selected' : ''}" type="button" data-action="equip-paint" data-id="${paint}" aria-label="${label}${owned ? '' : ', locked'}" aria-pressed="${equippedPaint() === paint}" ${owned ? '' : 'disabled'}><i style="background:${color}"></i><span>${label}</span></button>`; }).join('')}</div><small>Purchased paint applies to every hull, sail and pennant. Boat stats stay the same.</small>
+    <strong>Dockyard theme</strong><div class="paint-options">${(['working', 'festival'] as YardThemeId[]).map(theme => `<button class="paint-choice ${equippedYard() === theme ? 'selected' : ''}" type="button" data-action="equip-yard" data-id="${theme}" aria-pressed="${equippedYard() === theme}" ${ownsYardTheme(theme, purchasedProducts) ? '' : 'disabled'}><i style="background:${theme === 'festival' ? '#efb364' : '#9ca9a9'}"></i><span>${theme === 'festival' ? 'Festival Dockyard' : 'Working Dockyard'}</span></button>`).join('')}</div>${cloudSupported ? '<button class="text-button" type="button" data-action="cloud">Browse permanent looks →</button>' : '<small>Extra looks are available in the iOS app.</small>'}</div>
     ${inspectedBoat && upgrade ? `<div class="section-heading"><span>${inspectedBoat.name.toUpperCase()} · INSPECTION</span><button class="yard-back" type="button" data-action="yard-overview">← ALL BOATS</button></div>
     <div class="inspection-card"><strong>${save.boatCondition[inspected!] ?? 100}% condition</strong><span>${usableCells(inspectedBoat)} cargo cells · ${inspectedBoat.handling}</span><span>✦ ${inspectedBoat.ability}: ${inspectedBoat.abilityDetail}</span><span>${inspected === BACKUP_BOAT_INDEX ? 'Always free to sail · no repair bill' : (save.boatCondition[inspected!] ?? 100) < MIN_SEAWORTHY_CONDITION ? 'Needs repairs before sailing' : 'Seaworthy'}</span>${save.boat === inspected ? '<span class="fleet-active-label">✓ Active boat</span>' : `<button class="secondary-button" type="button" data-action="switch-boat" data-id="${inspected}" ${inspected !== BACKUP_BOAT_INDEX && (save.boatCondition[inspected!] ?? 100) < MIN_SEAWORTHY_CONDITION ? 'disabled' : ''}>${inspected !== BACKUP_BOAT_INDEX && (save.boatCondition[inspected!] ?? 100) < MIN_SEAWORTHY_CONDITION ? 'Repair to sail' : 'Use this boat'}</button>`}</div>
     <div class="upgrade-list">
@@ -419,17 +457,21 @@ function renderMarket(): void {
   const cards = catalog.map(({ craft, index }, position) => {
     const owned = save.ownedBoats.includes(index);
     const active = save.boat === index;
+    const discounted = tokenWallet?.discountedBoats.includes(index) ?? false;
+    const cashPrice = chartedBoatPrice(craft.price, discounted);
     return `<article class="market-card ${active ? 'market-active' : ''}" style="--boat-color:${craft.color}">
-      <div class="market-art"><span class="market-number">NO. ${String(position + 1).padStart(2, '0')}</span>${boatIcon(index)}<span class="market-badge">${owned ? active ? 'SAILING' : 'OWNED' : money(craft.price)}</span></div>
+      <div class="market-art"><span class="market-number">NO. ${String(position + 1).padStart(2, '0')}</span>${boatIcon(index)}<span class="market-badge">${owned ? active ? 'SAILING' : 'OWNED' : money(cashPrice)}</span></div>
       <div class="market-body"><h2>${craft.name}</h2><p>${craft.description}</p>
       <div class="market-hold">${holdDiagram(index)}<span><strong>${usableCells(craft)} cells</strong><small>${craft.width} × ${craft.height} shaped hold</small></span></div>
       <div class="market-stats"><span><strong>${Math.round(craft.speed * 100)}%</strong><small>Speed</small></span><span><strong>${craft.handling}</strong><small>Steering</small></span><span><strong>${craft.hull}</strong><small>Hull</small></span></div><div class="boat-ability"><strong>✦ ${craft.ability}</strong><span>${craft.abilityDetail}</span></div>
-      ${active ? '<span class="fleet-active-label">✓ Your active boat</span>' : owned ? `<button class="secondary-button full" type="button" data-action="switch-boat" data-id="${index}" ${index !== BACKUP_BOAT_INDEX && (save.boatCondition[index] ?? 100) < MIN_SEAWORTHY_CONDITION ? 'disabled' : ''}>${index !== BACKUP_BOAT_INDEX && (save.boatCondition[index] ?? 100) < MIN_SEAWORTHY_CONDITION ? 'Repair to sail' : 'Use this boat'}</button>` : `<button class="primary-button full" type="button" data-action="buy-boat" data-id="${index}" ${save.cash < craft.price ? 'disabled' : ''}>Buy for ${money(craft.price)}</button>`}</div>
+      ${discounted && !owned ? '<span class="token-discount-note">✦ Half-price boat chart ready</span>' : ''}
+      ${cloudSupported && tokenWallet && index > 0 && index < BACKUP_BOAT_INDEX && !owned && !discounted ? `<div class="token-discount"><span>Cash price: ${money(craft.price)} → ${money(chartedBoatPrice(craft.price, true))}</span>${confirmDiscountBoat === index ? `<p>Spend ${boatChartCost(craft.price)} Chart Tokens on this boat's permanent cash discount? The boat's stats stay the same.</p><button class="primary-button" type="button" data-action="confirm-boat-discount" data-id="${index}" ${tokenBusy || tokenWallet.balance < boatChartCost(craft.price) ? 'disabled' : ''}>Spend ${boatChartCost(craft.price)} tokens</button><button class="text-button" type="button" data-action="cancel-boat-discount">Cancel</button>` : `<button class="secondary-button" type="button" data-action="offer-boat-discount" data-id="${index}" ${tokenBusy || tokenWallet.balance < boatChartCost(craft.price) ? 'disabled' : ''}>Chart for ${boatChartCost(craft.price)} tokens</button>`}</div>` : ''}
+      ${active ? '<span class="fleet-active-label">✓ Your active boat</span>' : owned ? `<button class="secondary-button full" type="button" data-action="switch-boat" data-id="${index}" ${index !== BACKUP_BOAT_INDEX && (save.boatCondition[index] ?? 100) < MIN_SEAWORTHY_CONDITION ? 'disabled' : ''}>${index !== BACKUP_BOAT_INDEX && (save.boatCondition[index] ?? 100) < MIN_SEAWORTHY_CONDITION ? 'Repair to sail' : 'Use this boat'}</button>` : `<button class="primary-button full" type="button" data-action="buy-boat" data-id="${index}" ${save.cash < cashPrice || tokenBusy ? 'disabled' : ''}>Buy for ${money(cashPrice)} cash</button>`}</div>
     </article>`;
   }).join('');
   view.innerHTML = `<main class="atlas-screen market-screen" aria-label="Boat marketplace"><div class="atlas-wrap">
     <div class="atlas-top"><button class="atlas-back" type="button" data-action="yard">← Shipyard</button><span>⚓ THE BOAT MARKET</span><button class="atlas-back" type="button" data-action="map">Harbor map →</button></div>
-    <div class="atlas-heading"><span class="eyebrow">A BOAT FOR EVERY KIND OF CAPTAIN</span><h1>Find your next boat.</h1><p>Compare all ${BOATS.length} hulls. A bigger hold carries more cargo; a smaller boat answers the helm faster.</p></div>
+    <div class="atlas-heading"><span class="eyebrow">A BOAT FOR EVERY KIND OF CAPTAIN</span><h1>Find your next boat.</h1><p>Compare all ${BOATS.length} hulls. A bigger hold carries more cargo; a smaller boat answers the helm faster.</p>${cloudSupported ? `<div class="market-token-link">Chart Tokens: ${tokenWallet?.balance ?? 'checking iCloud'} · <button class="text-button" type="button" data-action="cloud">Get tokens or boat paint →</button></div>` : ''}</div>
     <div class="market-grid">${cards}</div><div class="atlas-bottom"><button class="secondary-button" type="button" data-action="board">← Job board</button><button class="secondary-button" type="button" data-action="yard">Your shipyard →</button></div>
   </div></main>`;
   view.querySelector<HTMLElement>('.market-screen')!.scrollTop = previousScroll;
@@ -488,7 +530,7 @@ function render(): void {
   if (phase === 'pack') renderPack();
   if (phase === 'run') renderRun();
   if (phase === 'result') renderResult();
-  if (phase === 'yard') { world.showShipyard(save.ownedBoats, save.boat); world.focusShipyardBoat(yardSelected); renderYard(); }
+  if (phase === 'yard') { world.showShipyard(save.ownedBoats, save.boat, equippedPaint(), equippedYard()); world.focusShipyardBoat(yardSelected); renderYard(); }
   else world.hideShipyard();
   if (phase === 'market') renderMarket();
   if (phase === 'map') renderMap();
@@ -596,7 +638,7 @@ function endRun(won: boolean, reason: string): void {
   save.cash += payout; save.reputation = Math.max(0, save.reputation + rep); save.runs++;
   if (won) { recordHarborDelivery(save, save.port, jobs, run.collisions === 0 && run.elapsed <= run.deadline); save.offerCycle++; }
   const backupNeeded = save.boat !== BACKUP_BOAT_INDEX && save.boatCondition[save.boat] < MIN_SEAWORTHY_CONDITION && save.cash < repairCost(save);
-  if (backupNeeded) { save.boat = BACKUP_BOAT_INDEX; world.setBoat(boat()); }
+  if (backupNeeded) { save.boat = BACKUP_BOAT_INDEX; world.setBoat(boat(), equippedPaint()); }
   if (won) save.level += 1;
   refreshHarborUnlocks(save);
   result = { won, reason, payout, base, bonus, challengeBonus, adjustment, service, rep };
@@ -746,14 +788,20 @@ function handleAction(action: string, id?: string, target?: HTMLElement): void {
   }
   else if (action === 'restore-purchases') {
     void restorePurchases().then(products => {
-      purchasedProducts = products; render(); notify(products.length ? 'Purchases restored.' : 'No restorable purchases found.', products.length ? 'success' : 'info');
+      applyEntitlements(products); void refreshTokenWallet(); notify(products.length ? 'Permanent looks restored.' : 'No permanent purchases found.', products.length ? 'success' : 'info');
     }).catch(error => { notify(error instanceof Error ? error.message : String(error), 'danger'); });
   }
   else if (action === 'refresh-wallet') { void refreshTokenWallet(); }
   else if (action === 'buy-tokens' && id) { void purchaseTokens(id); }
+  else if (action === 'buy-premium' && id) { void purchasePremium(id); }
+  else if (action === 'equip-paint' && id && ownsPaint(id as PaintId, purchasedProducts)) { save.paint = id as PaintId; world.setBoat(boat(), equippedPaint()); saveProgress(); render(); notify(`${id === 'original' ? 'Original colours' : PAINTS[id as Exclude<PaintId, 'original'>].label} fitted to your fleet.`, 'success'); }
+  else if (action === 'equip-yard' && id && ownsYardTheme(id as YardThemeId, purchasedProducts)) { save.yardTheme = id as YardThemeId; saveProgress(); render(); notify(`${id === 'festival' ? 'Festival' : 'Working'} Dockyard ready.`, 'success'); }
   else if (action === 'offer-discount' && id) { confirmDiscountHarbor = Number(id); render(); }
   else if (action === 'cancel-discount') { confirmDiscountHarbor = null; render(); }
   else if (action === 'confirm-discount' && id && confirmDiscountHarbor === Number(id)) { void purchaseHarborDiscount(Number(id)); }
+  else if (action === 'offer-boat-discount' && id) { confirmDiscountBoat = Number(id); render(); }
+  else if (action === 'cancel-boat-discount') { confirmDiscountBoat = null; render(); }
+  else if (action === 'confirm-boat-discount' && id && confirmDiscountBoat === Number(id)) { void purchaseBoatDiscount(Number(id)); }
   else if (action === 'add-job' && id) addJob(id);
   else if (action === 'remove-job' && id) removeJob(id);
   else if (action === 'pack' && jobs.length) { phase = 'pack'; selected = pieces.find(piece => piece.x === null)?.id || null; render(); }
@@ -761,7 +809,7 @@ function handleAction(action: string, id?: string, target?: HTMLElement): void {
   else if (action === 'yard') { yardSelected = null; phase = 'yard'; render(); }
   else if (action === 'inspect-boat' && id) { const index = Number(id); if (!save.ownedBoats.includes(index)) return; yardSelected = index; world.focusShipyardBoat(index); renderYard(); }
   else if (action === 'yard-overview') { yardSelected = null; world.focusShipyardBoat(null); renderYard(); }
-  else if (action === 'market') { phase = 'market'; render(); }
+  else if (action === 'market') { phase = 'market'; render(); if (cloudSupported) void refreshTokenWallet(); }
   else if (action === 'map') { phase = 'map'; render(); if (cloudSupported) void refreshTokenWallet(); }
   else if (action === 'select-piece' && id) { selected = id; tick(); render(); }
   else if (action === 'rotate') { const piece = pieces.find(item => item.id === selected); if (piece && piece.x === null) { piece.rotation = (piece.rotation + 1) % 4; tick(); render(); } }
@@ -797,18 +845,20 @@ function handleAction(action: string, id?: string, target?: HTMLElement): void {
     save.cash -= cost; save.yardUpgrades[key]++; saveProgress(); tick(); render(); notify(`${key === 'repairBay' ? 'Repair workshop' : "Broker's desk"} upgraded.`, 'success');
   }
   else if (action === 'buy-boat' && id) {
-    const index = Number(id); const craft = BOATS[index];
-    if (!craft || save.ownedBoats.includes(index) || save.cash < craft.price) return;
-    save.cash -= craft.price; save.ownedBoats.push(index); save.ownedBoats.sort((a, b) => a - b);
-    save.boatUpgrades[index] = { engine: 0, hull: 0 }; save.boatCondition[index] = 100;
-    save.boat = index;
-    refreshHarborUnlocks(save);
-    jobs = []; pieces = []; selected = null; world.setBoat(craft); saveProgress(); tick(); render();
-    notify(`${craft.name} is yours! Its ${craft.ability.toLowerCase()} ability is ready.`, 'success');
+    const index = Number(id);
+    if (cloudSupported && index > 0 && index < BACKUP_BOAT_INDEX) {
+      void readTokenWallet().then(wallet => { showTokenWallet(wallet); finishBuyingBoat(index); })
+        .catch(() => {
+          const discountShown = tokenWallet?.discountedBoats.includes(index) ?? false;
+          tokenWallet = null;
+          if (discountShown) notify('Reconnect to iCloud to use your half-price boat chart.', 'danger');
+          else finishBuyingBoat(index);
+        });
+    } else finishBuyingBoat(index);
   }
   else if (action === 'switch-boat' && id) {
     const index = Number(id); if (!save.ownedBoats.includes(index) || index === save.boat || (index !== BACKUP_BOAT_INDEX && (save.boatCondition[index] ?? 100) < MIN_SEAWORTHY_CONDITION)) return;
-    save.boat = index; jobs = []; pieces = []; selected = null; world.setBoat(boat()); saveProgress(); tick(); render(); notify(`${boat().name} is ready to sail.`, 'success');
+    save.boat = index; jobs = []; pieces = []; selected = null; world.setBoat(boat(), equippedPaint()); saveProgress(); tick(); render(); notify(`${boat().name} is ready to sail.`, 'success');
   }
   else if (action === 'select-port' && id) {
     const index = Number(id); if (!save.unlockedPorts.includes(index) || index === save.port) return;
@@ -834,6 +884,18 @@ function finishOpeningPort(index: number): void {
   if (!openHarbor(save, index, tokenWallet?.discountedHarbors.includes(index) ?? false)) return;
   save.port = index; jobs = []; pieces = []; selected = null; phase = 'board';
   saveProgress(); tick(); render(); notify(`${PORTS[index]} charted and ready to sail!`, 'success');
+}
+
+function finishBuyingBoat(index: number): void {
+  const craft = BOATS[index];
+  if (!craft || save.ownedBoats.includes(index)) return;
+  const price = chartedBoatPrice(craft.price, tokenWallet?.discountedBoats.includes(index) ?? false);
+  if (save.cash < price) { notify(`Earn ${money(price - save.cash)} more cash for ${craft.name}.`, 'danger'); return; }
+  save.cash -= price; save.ownedBoats.push(index); save.ownedBoats.sort((a, b) => a - b);
+  save.boatUpgrades[index] = { engine: 0, hull: 0 }; save.boatCondition[index] = 100;
+  save.boat = index; refreshHarborUnlocks(save);
+  jobs = []; pieces = []; selected = null; world.setBoat(craft, equippedPaint()); saveProgress(); tick(); render();
+  notify(`${craft.name} is yours! Its ${craft.ability.toLowerCase()} ability is ready.`, 'success');
 }
 
 view.addEventListener('click', event => {
@@ -930,9 +992,12 @@ function frame(now: number): void {
 render(); requestAnimationFrame(frame);
 if (cloudSupported) {
   void watchTokenWallet(showTokenWallet);
+  void watchPremium(applyEntitlements);
   void refreshTokenWallet();
   void readTokenProducts().then(products => { tokenProducts = products; if (phase === 'cloud') render(); })
     .catch(error => { tokenError = error instanceof Error ? error.message : String(error); if (phase === 'cloud') render(); });
+  void readPremiumProducts().then(products => { premiumProducts = products; if (phase === 'cloud') render(); })
+    .catch(() => { premiumProducts = []; if (phase === 'cloud') render(); });
   void watchCloud(event => {
     if (event.quotaExceeded) { cloudState = 'iCloud storage is full. Device progress is safe.'; if (phase === 'cloud') render(); return; }
     void readCloud().then(result => { cloudAvailable = result.available; evaluateCloud(result.records); if (phase === 'cloud') render(); });
@@ -944,5 +1009,5 @@ if (cloudSupported) {
     if (cloudAvailable && result.records.length === 0 && !hasProgress(save)) scheduleCloudSave();
     if (phase === 'cloud') render();
   }).catch(error => { cloudState = `iCloud unavailable: ${error instanceof Error ? error.message : String(error)}`; });
-  void currentEntitlements().then(products => { purchasedProducts = products; if (phase === 'cloud') render(); }).catch(() => undefined);
+  void currentEntitlements().then(applyEntitlements).catch(() => undefined);
 }

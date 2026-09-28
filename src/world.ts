@@ -4,6 +4,7 @@ import { channelCenter, channelHalfWidth, destinationX, destinationZ, harborCour
 import { screenBearing } from './navigation';
 import { HARBORS, type Biome } from './harbors';
 import { BOATS, type BoatDefinition, type BoatStyle } from './model';
+import { PAINTS, type PaintId, type YardThemeId } from './premium';
 
 const mat = (color: string, roughness = 0.85) => new THREE.MeshStandardMaterial({ color, roughness, flatShading: true });
 const palette = {
@@ -89,8 +90,9 @@ function disposeModels(group: THREE.Object3D): void {
   });
 }
 
-function makeBoat(color: string, style: BoatStyle | 'patrol' = 'dinghy'): THREE.Group {
+function makeBoat(color: string, style: BoatStyle | 'patrol' = 'dinghy', paint: PaintId = 'original'): THREE.Group {
   const craft = new THREE.Group();
+  const finish = paint === 'original' ? null : PAINTS[paint];
   if (style === 'sailboat') craft.scale.setScalar(.78);
   const broad = ['trawler', 'freighter', 'catamaran', 'houseboat', 'barge'].includes(style);
   const long = ['cruiser', 'freighter', 'clipper', 'barge'].includes(style);
@@ -198,8 +200,8 @@ function makeBoat(color: string, style: BoatStyle | 'patrol' = 'dinghy'): THREE.
     }
   } else if (style === 'clipper') {
     for (const z of [-1.4,1.0]) cylinder(craft, '#aa805b', 0, 3.28, z, .075, 3.2);
-    fabricSail(craft, '#fff0d2', 'clipper-main', [new THREE.Vector3(0,4.84,-1.4),new THREE.Vector3(0,2.1,-1.4),new THREE.Vector3(.12,2.15,-2.85)], .17);
-    fabricSail(craft, '#f6dba4', 'clipper-fore', [new THREE.Vector3(0,4.83,1),new THREE.Vector3(0,2.1,1),new THREE.Vector3(-.1,2.08,2.62)], -.16);
+    fabricSail(craft, finish?.sail ?? '#fff0d2', 'clipper-main', [new THREE.Vector3(0,4.84,-1.4),new THREE.Vector3(0,2.1,-1.4),new THREE.Vector3(.12,2.15,-2.85)], .17);
+    fabricSail(craft, finish?.sail ?? '#f6dba4', 'clipper-fore', [new THREE.Vector3(0,4.83,1),new THREE.Vector3(0,2.1,1),new THREE.Vector3(-.1,2.08,2.62)], -.16);
     box(craft, '#e6c28c', 0, 1.71, 1.67, 1.05, .12, 1.5);
     cone(craft, '#f3a77e', 0, 5.13, -1.4, .24, .46, 3).rotation.z = Math.PI / 2;
     cone(craft, '#80c9bc', 0, 5.11, 1.0, .2, .4, 3).rotation.z = Math.PI / 2;
@@ -218,15 +220,22 @@ function makeBoat(color: string, style: BoatStyle | 'patrol' = 'dinghy'): THREE.
     cylinder(craft, '#9a714d', 0, 3.47, .22, .074, 3.86);
     const rig = new THREE.Group(); rig.rotation.y = -.55; rig.position.z = .2; craft.add(rig);
     box(rig, '#aa8053', 0, 2.03, -.96, .075, .075, 1.94);
-    fabricSail(rig, '#fff6de', 'sailboat-main', [new THREE.Vector3(0,5.35,0),new THREE.Vector3(0,2.1,0),new THREE.Vector3(.03,2.1,-1.99)], .42);
+    fabricSail(rig, finish?.sail ?? '#fff6de', 'sailboat-main', [new THREE.Vector3(0,5.35,0),new THREE.Vector3(0,2.1,0),new THREE.Vector3(.03,2.1,-1.99)], .42);
     fabricSail(rig, '#eaa777', 'sailboat-patch', [new THREE.Vector3(.015,3.08,-.04),new THREE.Vector3(.02,2.12,-.03),new THREE.Vector3(.05,2.12,-1.85)], .46);
-    fabricSail(craft, '#f9d9a0', 'sailboat-jib', [new THREE.Vector3(.02,4.63,.27),new THREE.Vector3(.01,1.92,2.14),new THREE.Vector3(.02,2.1,.74)], -.24);
+    fabricSail(craft, finish?.sail ?? '#f9d9a0', 'sailboat-jib', [new THREE.Vector3(.02,4.63,.27),new THREE.Vector3(.01,1.92,2.14),new THREE.Vector3(.02,2.1,.74)], -.24);
     tube(craft, '#faf0d7', [new THREE.Vector3(0,5.35,.2),new THREE.Vector3(0,1.87,2.17)], .025);
     box(craft, '#efd3a0', 0, 1.73, 1.82, .6, .07, .33);
     cone(craft, '#f1b476', 0, 5.5, .22, .17, .29, 3).rotation.z = Math.PI / 2;
   } else {
     cylinder(craft, '#f5f3d9', 0, 1.8, 1.38, .15, .22);
     cone(craft, '#ffce5c', 0, 2.1, 1.38, .25, .35, 5);
+  }
+  if (finish) {
+    const poleX = style === 'sailboat' || style === 'clipper' ? .48 : 0;
+    cylinder(craft, '#f4deb3', poleX, 2.7, back + .52, .035, 1.45, 6);
+    const flag = new THREE.Mesh(new THREE.ConeGeometry(.37, .65, 3), mat(finish.pennant));
+    flag.rotation.set(Math.PI / 2, 0, Math.PI / 2); flag.position.set(poleX + .26, 3.35, back + .52); craft.add(flag);
+    for (const side of [-1, 1]) box(craft, finish.pennant, side * half * .94, 1.36, -.1, .075, .12, Math.abs(back) + front - 1.2);
   }
   const cargo = new THREE.Group(); cargo.name = 'deck-cargo'; craft.add(cargo);
   if (style !== 'patrol') ['#ffd95d', '#f49d77', '#8ed6ad'].forEach((c, i) => {
@@ -723,10 +732,10 @@ export class World {
     this.resize(); window.addEventListener('resize', () => this.resize());
   }
 
-  setBoat(craft: BoatDefinition): void {
+  setBoat(craft: BoatDefinition, paint: PaintId = 'original'): void {
     this.scene.remove(this.boat);
     disposeModels(this.boat);
-    this.boat = makeBoat(craft.color, craft.style);
+    this.boat = makeBoat(paint === 'original' ? craft.color : PAINTS[paint].color, craft.style, paint);
     this.boatDraftOffset = craft.style === 'sailboat' ? .73 : .94;
     const lamp = new THREE.SpotLight('#ffe5a6', 25, 32, .55, .68, 1.3);
     lamp.position.set(0, 2.9, 1.7);
@@ -773,13 +782,13 @@ export class World {
     water.uniforms.uLight.value.set(plan.night ? '#246f91' : plan.weather === 'storm' ? '#779ea8' : light);
   }
 
-  showShipyard(owned: number[], active: number): void {
+  showShipyard(owned: number[], active: number, paint: PaintId = 'original', theme: YardThemeId = 'working'): void {
     disposeModels(this.yard);
     this.inYard = true; this.yardCount = owned.length; this.yard.clear(); this.yardBerths.clear(); this.yardBoats.clear(); this.yardFocused = null; this.yard.visible = true; this.route.visible = false;
     this.boat.visible = false; this.boatFoam.visible = false; this.bowWash.visible = false;
     // Poured concrete apron, marked service bays, workshops, gantry and stored freight.
-    box(this.yard, '#9ca9a9', 0, .35, -16, 72, .7, 13);
-    box(this.yard, '#c7d0c7', 0, .76, -16, 72, .13, 13);
+    box(this.yard, theme === 'festival' ? '#96b6aa' : '#9ca9a9', 0, .35, -16, 72, .7, 13);
+    box(this.yard, theme === 'festival' ? '#e8d9b6' : '#c7d0c7', 0, .76, -16, 72, .13, 13);
     box(this.yard, '#6e8990', 0, .72, -9.35, 72, .32, .48);
     for (let i = -3; i <= 3; i++) {
       const x = i * 10;
@@ -789,7 +798,15 @@ export class World {
     }
     // Workshop, glazing and loading doors.
     box(this.yard, '#d8d8c8', -19, 2.95, -23.4, 18, 4.8, 6.6);
-    box(this.yard, '#dc826b', -19, 5.5, -23.4, 19, .55, 7.4);
+    box(this.yard, theme === 'festival' ? '#efb364' : '#dc826b', -19, 5.5, -23.4, 19, .55, 7.4);
+    if (theme === 'festival') {
+      for (let i = 0; i < 13; i++) {
+        const x = -31 + i * 5;
+        cylinder(this.yard, '#f4e6c0', x, 3.1, -9.4, .055, 4.3, 6);
+        const flag = cone(this.yard, ['#f38672', '#f5cf70', '#8bd2bd'][i % 3], x + .35, 5.06, -9.4, .26, .55, 3);
+        flag.rotation.z = Math.PI / 2;
+      }
+    }
     for (let i = 0; i < 3; i++) {
       box(this.yard, '#4b8190', -25 + i * 6, 2.2, -20.02, 3.7, 2.8, .12);
       box(this.yard, '#f3d797', -25 + i * 6, 3.74, -19.92, 3.9, .14, .18);
@@ -818,7 +835,7 @@ export class World {
       const columns = Math.min(owned.length - row * 5, 5);
       const x = (column - (columns - 1) / 2) * 11;
       const z = -4 + row * 11;
-      const model = makeBoat(def.color, def.style); model.position.set(x, -.35, z); model.rotation.y = -.15; model.userData.boatIndex = index; model.getObjectByName('deck-cargo')!.visible = false; this.yard.add(model);
+      const model = makeBoat(paint === 'original' ? def.color : PAINTS[paint].color, def.style, paint); model.position.set(x, -.35, z); model.rotation.y = -.15; model.userData.boatIndex = index; model.getObjectByName('deck-cargo')!.visible = false; this.yard.add(model);
       this.yardBoats.set(index, model); this.yardBerths.set(index, new THREE.Vector3(x, 0, z));
       const foam = makeHullFoam(def.style === 'sailboat' ? 1.35 : index >= 3 ? 2.4 : 1.8, def.style === 'sailboat' ? 1.95 : index >= 3 ? 3.3 : 2.5); foam.position.set(x, .05, z); this.yard.add(foam);
       // A floating pontoon and repair gantry beside every berth.

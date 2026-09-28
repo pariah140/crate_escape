@@ -1,4 +1,5 @@
 import { HARBORS } from './harbors';
+import type { PaintId, YardThemeId } from './premium';
 export { HARBORS } from './harbors';
 
 export type Phase = 'board' | 'pack' | 'run' | 'result' | 'yard' | 'market' | 'map' | 'cloud';
@@ -57,6 +58,8 @@ export interface SaveData {
   sound: boolean;
   harborRecords: Record<number, HarborRecord>;
   offerCycle: number;
+  paint: PaintId;
+  yardTheme: YardThemeId;
 }
 
 export const BOATS: BoatDefinition[] = [
@@ -341,7 +344,7 @@ export function canFitAll(pieces: Piece[], width: number, height: number, blocke
 }
 
 export function defaultSave(): SaveData {
-  return { cash: 80, reputation: 0, boat: 0, ownedBoats: [0, BACKUP_BOAT_INDEX], port: 0, unlockedPorts: [0], boatUpgrades: { 0: { engine: 0, hull: 0 }, [BACKUP_BOAT_INDEX]: { engine: 0, hull: 0 } }, boatCondition: { 0: 100, [BACKUP_BOAT_INDEX]: 100 }, yardUpgrades: { repairBay: 0, brokerDesk: 0 }, runs: 0, level: 1, soundTutorialSeen: false, sound: true, harborRecords: {}, offerCycle: 0 };
+  return { cash: 80, reputation: 0, boat: 0, ownedBoats: [0, BACKUP_BOAT_INDEX], port: 0, unlockedPorts: [0], boatUpgrades: { 0: { engine: 0, hull: 0 }, [BACKUP_BOAT_INDEX]: { engine: 0, hull: 0 } }, boatCondition: { 0: 100, [BACKUP_BOAT_INDEX]: 100 }, yardUpgrades: { repairBay: 0, brokerDesk: 0 }, runs: 0, level: 1, soundTutorialSeen: false, sound: true, harborRecords: {}, offerCycle: 0, paint: 'original', yardTheme: 'working' };
 }
 
 export const GUEST_SAVE_KEY = 'crate-escape-save-v1';
@@ -378,7 +381,9 @@ export function parseSave(raw: unknown): SaveData {
       yardUpgrades: { repairBay: Math.max(0, Math.min(3, Number(data.yardUpgrades?.repairBay) || 0)), brokerDesk: Math.max(0, Math.min(3, Number(data.yardUpgrades?.brokerDesk) || 0)) },
       runs: Math.max(0, Number(data.runs) || 0), level: Math.max(1, Math.floor(Number(data.level) || (Math.max(0, Number(data.runs) || 0) + 1))),
       soundTutorialSeen: data.soundTutorialSeen === true, sound: typeof data.sound === 'boolean' ? data.sound : initial.sound,
-      harborRecords, offerCycle: Math.max(0, Math.floor(Number(data.offerCycle) || Number(data.runs) || 0)) };
+      harborRecords, offerCycle: Math.max(0, Math.floor(Number(data.offerCycle) || Number(data.runs) || 0)),
+      paint: ['original', 'festival', 'coral', 'moon'].includes(String(data.paint)) ? data.paint! : 'original',
+      yardTheme: data.yardTheme === 'festival' ? 'festival' : 'working' };
     if (restored.boat !== BACKUP_BOAT_INDEX && restored.boatCondition[restored.boat] < MIN_SEAWORTHY_CONDITION && restored.cash < repairCost(restored)) restored.boat = BACKUP_BOAT_INDEX;
     refreshHarborUnlocks(restored);
     if (!restored.unlockedPorts.includes(restored.port)) restored.port = 0;
