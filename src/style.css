@@ -297,7 +297,6 @@ button:active:not(:disabled) { transform: translateY(2px); }
 .run-instruction strong { font-size: 14px; letter-spacing: .08em; }
 .run-instruction span { font-size: 10px; color: #c0dfd5; }
 .run-timer { font: 900 23px ui-monospace, monospace; color: var(--yellow); }
-.scene.steering { filter: saturate(1.13); }
 
 .result-screen { position: absolute; inset: 0; display: grid; place-items: center; padding: 110px 20px 24px; background: rgba(5,59,70,.34); }
 .result-card { width: min(430px, 100%); padding: 28px; border-radius: 25px; border: 3px solid var(--ink); background: var(--paper); box-shadow: 9px 11px 0 rgba(7,66,75,.78); text-align: center; max-height: 100%; overflow-y: auto; }

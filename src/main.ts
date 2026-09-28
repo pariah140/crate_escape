@@ -61,7 +61,7 @@ world.configureLevel(currentPlan);
 interface RunState {
   x: number; z: number; vx: number; vz: number; speed: number; hull: number; maxHull: number; heat: number;
   contact: number; damageCooldown: number; collisions: number; elapsed: number;
-  holding: boolean; pointer: number | null; pointerX: number; pointerY: number; mouseFollowing: boolean;
+  pointer: number | null; pointerStartX: number; pointerStartY: number; pointerDownAt: number; pointerMoved: boolean;
   tapTarget: { x: number; z: number } | null; deadline: number; patrolHeat: number; hotCargo: boolean; ending: boolean;
   heading: number; engineOn: boolean; lightsOn: boolean; tutorialOpen: boolean; tutorialPending: boolean; soundExposure: number; offshoreTime: number;
 }
@@ -375,8 +375,8 @@ function renderRun(): void {
     <div id="sea-warning" class="sea-warning" role="status" aria-live="polite"></div>
     <div id="port-compass" class="port-compass" role="img" aria-label="View compass for boat and destination"><div class="compass-face" aria-hidden="true"><span id="compass-north" class="compass-n">N</span><span id="compass-port" class="compass-port-marker"></span><span id="compass-needle" class="compass-boat-marker"></span><span class="compass-hub"></span></div><div class="compass-copy"><span class="compass-eyebrow">VIEW COMPASS</span><span class="heading-label">BOAT <b id="heading-arrow" class="compass-arrow">↑</b></span><span class="port-label">PORT <b id="port-arrow" class="compass-arrow">↑</b><small id="port-distance">${Math.round(currentPlan.routeEnd)} m</small></span><strong>${escapeHtml(HARBORS[currentPlan.port].name.toUpperCase())}</strong></div></div>
     <div class="engine-controls"><div id="engine-status" class="engine-status">ENGINE IDLE</div>${currentPlan.night ? `<button id="light-toggle" class="light-toggle" type="button" data-action="toggle-lights" aria-pressed="${run?.lightsOn ? 'true' : 'false'}" aria-label="Toggle boat lights">☼ LIGHTS ON</button>` : ''}<button class="cut-engine" type="button" data-action="cut-engine" aria-label="Cut engine and coast">✦ CUT ENGINE</button></div>
-    <div class="run-bottom"><div class="run-instruction"><strong id="run-instruction-title">POINT TO PILOT</strong><span id="run-instruction-detail">Move your mouse or drag a finger · the boat follows your point</span></div><div id="run-timer" class="run-timer">00:00</div></div>
-    ${run?.tutorialOpen ? `<div class="sound-tutorial"><div class="sound-card"><span class="eyebrow">NEW PATROL · ACOUSTIC LISTENING</span><h2>Quiet waters, loud engines.</h2><div class="sound-demo" aria-hidden="true"><span class="demo-boat">🚤</span><span class="demo-wave wave-one"></span><span class="demo-wave wave-two"></span><span class="demo-patrol">◉</span></div><p>Build speed before its listening ring. Then tap Cut engine to coast silently through. You can steer again once clear.</p><button class="primary-button full" type="button" data-action="dismiss-sound-tutorial">Got it · set sail →</button></div></div>` : ''}
+    <div class="run-bottom"><div class="run-instruction"><strong id="run-instruction-title">TAP TO SET COURSE</strong><span id="run-instruction-detail">Tap or click the water · tap again to change course</span></div><div id="run-timer" class="run-timer">00:00</div></div>
+    ${run?.tutorialOpen ? `<div class="sound-tutorial"><div class="sound-card"><span class="eyebrow">NEW PATROL · ACOUSTIC LISTENING</span><h2>Quiet waters, loud engines.</h2><div class="sound-demo" aria-hidden="true"><span class="demo-boat">🚤</span><span class="demo-wave wave-one"></span><span class="demo-wave wave-two"></span><span class="demo-patrol">◉</span></div><p>Tap ahead to build speed before its listening ring. Then tap Cut engine to coast silently through. Set another course once clear.</p><button class="primary-button full" type="button" data-action="dismiss-sound-tutorial">Got it · set sail →</button></div></div>` : ''}
   </main>`;
   updateHud();
 }
@@ -607,9 +607,9 @@ function beginRun(): void {
   const maxHull = boat().hull + boatUpgrade(save).hull * 15;
   const patrolHeat = jobs.reduce((sum, job) => sum + job.heat, 0);
   const hotCargo = jobs.some(job => job.kind === 'hot');
-  run = { x: 0, z: 0, vx: 0, vz: 0, speed: 0, hull: maxHull * (save.boatCondition[save.boat] ?? 100) / 100, maxHull, heat: Math.min(65, patrolHeat * 4 + (hotCargo ? 8 : 0)), contact: 0, damageCooldown: 0, collisions: 0, elapsed: 0, holding: false, pointer: null, pointerX: 0, pointerY: 0, mouseFollowing: false, tapTarget: null, deadline: jobs.some(job => job.kind === 'perishable') ? (25 + currentPlan.routeEnd / 5.2) * boatTraits(boat()).deadline : Infinity, patrolHeat, hotCargo, ending: false, heading: 0, engineOn: false, lightsOn: currentPlan.night, tutorialOpen: false, tutorialPending: currentPlan.patrols.some(patrol => patrol.sound) && !save.soundTutorialSeen, soundExposure: 0, offshoreTime: 0 };
+  run = { x: 0, z: 0, vx: 0, vz: 0, speed: 0, hull: maxHull * (save.boatCondition[save.boat] ?? 100) / 100, maxHull, heat: Math.min(65, patrolHeat * 4 + (hotCargo ? 8 : 0)), contact: 0, damageCooldown: 0, collisions: 0, elapsed: 0, pointer: null, pointerStartX: 0, pointerStartY: 0, pointerDownAt: 0, pointerMoved: false, tapTarget: null, deadline: jobs.some(job => job.kind === 'perishable') ? (25 + currentPlan.routeEnd / 5.2) * boatTraits(boat()).deadline : Infinity, patrolHeat, hotCargo, ending: false, heading: 0, engineOn: false, lightsOn: currentPlan.night, tutorialOpen: false, tutorialPending: currentPlan.patrols.some(patrol => patrol.sound) && !save.soundTutorialSeen, soundExposure: 0, offshoreTime: 0 };
   world.setNightLighting(currentPlan.night, run.lightsOn);
-  heldKeys.clear(); phase = 'run'; render(); beep(400, 0.15, 'triangle'); notify('Cargo aboard. Point the mouse or drag your finger to pilot!', 'success');
+  heldKeys.clear(); phase = 'run'; render(); beep(400, 0.15, 'triangle'); notify('Cargo aboard. Tap or click the water to set course!', 'success');
 }
 
 function updateHud(): void {
@@ -690,8 +690,8 @@ function showImpact(label: string): void {
 
 function beginDeliveryDocking(): void {
   if (!run || run.ending) return;
-  run.ending = true; run.holding = false; run.pointer = null; run.mouseFollowing = false; run.tapTarget = null;
-  heldKeys.clear(); sceneHost.classList.remove('steering'); gameShell.classList.remove('is-running');
+  run.ending = true; run.pointer = null; run.tapTarget = null;
+  heldKeys.clear(); gameShell.classList.remove('is-running');
   const approach = world.beginDocking(run.x, run.z);
   document.getElementById('run-instruction-title')!.textContent = 'DOCKING AT THE PIER';
   document.getElementById('run-instruction-detail')!.textContent = 'Ease in and tie up alongside';
@@ -709,25 +709,16 @@ function steeringPoint(clientX: number, clientY: number): { x: number; z: number
   return world.screenToWater(clientX, clientY);
 }
 
-function trackingPoint(): { x: number; z: number } | null {
-  if (!run || (!run.holding && !run.mouseFollowing)) return null;
-  // Reproject every frame so a held finger or stationary mouse still points to
-  // the same place on screen as the camera follows the boat.
-  return steeringPoint(run.pointerX, run.pointerY);
-}
-
 function updateRun(dt: number): void {
   if (!run || phase !== 'run' || run.ending || run.tutorialOpen) return;
   if (run.tutorialPending && world.patrols.some(patrol => patrol.sound && Math.abs(run!.z - patrol.z) < 37)) {
-    run.tutorialPending = false; run.tutorialOpen = true; run.tapTarget = null; run.holding = false; run.pointer = null; run.mouseFollowing = false;
-    heldKeys.clear(); sceneHost.classList.remove('steering'); renderRun(); return;
+    run.tutorialPending = false; run.tutorialOpen = true; run.tapTarget = null; run.pointer = null;
+    heldKeys.clear(); renderRun(); return;
   }
   run.elapsed += dt; run.damageCooldown = Math.max(0, run.damageCooldown - dt);
   const maxSpeed = 9.2 * (boat().speed + boatUpgrade(save).engine * .09);
-  let target: { x: number; z: number } | null = null;
-  if ((run.holding && run.pointer !== null) || run.mouseFollowing) target = trackingPoint();
-  else if (!heldKeys.size && run.tapTarget) target = run.tapTarget;
-  if (target && Math.hypot(target.x - run.x, target.z - run.z) < .65 && !run.holding) { run.tapTarget = null; target = null; }
+  let target = !heldKeys.size ? run.tapTarget : null;
+  if (target && Math.hypot(target.x - run.x, target.z - run.z) < .65) { run.tapTarget = null; target = null; }
   const dx = Number(heldKeys.has('arrowright') || heldKeys.has('d')) - Number(heldKeys.has('arrowleft') || heldKeys.has('a'));
   const dz = Number(heldKeys.has('arrowup') || heldKeys.has('w')) - Number(heldKeys.has('arrowdown') || heldKeys.has('s'));
   run.engineOn = Boolean(target || dx || dz);
@@ -773,8 +764,8 @@ function updateRun(dt: number): void {
   const title = document.getElementById('run-instruction-title');
   const detail = document.getElementById('run-instruction-detail');
   if (title && detail && !run.ending) {
-    title.textContent = heard ? 'SONAR HEARS YOU' : run.z > currentPlan.routeEnd - 22 ? 'PORT APPROACH' : newOffshore.zone === 'rough' || newOffshore.zone === 'danger' ? 'ROUGH WATER' : !run.engineOn && currentPlan.patrols.some(p => p.sound) ? 'SILENT GLIDE' : currentPlan.weather === 'storm' ? 'HEAVY WEATHER' : 'POINT TO PILOT';
-    detail.textContent = heard ? 'Tap Cut engine to coast silently' : run.z > currentPlan.routeEnd - 22 ? 'Follow the compass and line up with the pier' : newOffshore.zone === 'rough' || newOffshore.zone === 'danger' ? 'Waves buffet the hull · steering responds more slowly' : !run.engineOn && currentPlan.patrols.some(p => p.sound) ? 'Momentum carries you past listening patrols' : currentPlan.currents.some(c => Math.hypot(run!.x - c.x, run!.z - c.z) < c.radius) ? 'Strong current · steer against the flow' : currentPlan.night ? run.lightsOn ? 'Lights reveal hazards · patrols can spot you sooner · L to toggle' : 'Dark water hides hazards · L to switch lights on' : 'Move your mouse or drag a finger · the boat follows your point';
+    title.textContent = heard ? 'SONAR HEARS YOU' : run.z > currentPlan.routeEnd - 22 ? 'PORT APPROACH' : newOffshore.zone === 'rough' || newOffshore.zone === 'danger' ? 'ROUGH WATER' : !run.engineOn && currentPlan.patrols.some(p => p.sound) ? 'SILENT GLIDE' : currentPlan.weather === 'storm' ? 'HEAVY WEATHER' : 'TAP TO SET COURSE';
+    detail.textContent = heard ? 'Tap Cut engine to coast silently' : run.z > currentPlan.routeEnd - 22 ? 'Follow the compass and line up with the pier' : newOffshore.zone === 'rough' || newOffshore.zone === 'danger' ? 'Waves buffet the hull · steering responds more slowly' : !run.engineOn && currentPlan.patrols.some(p => p.sound) ? 'Momentum carries you past listening patrols' : currentPlan.currents.some(c => Math.hypot(run!.x - c.x, run!.z - c.z) < c.radius) ? 'Strong current · steer against the flow' : currentPlan.night ? run.lightsOn ? 'Lights reveal hazards · patrols can spot you sooner · L to toggle' : 'Dark water hides hazards · L to switch lights on' : 'Tap or click the water · tap again to change course';
   }
   if (run.contact >= 1.5 || run.soundExposure >= 1.8 || run.heat >= 100) { run.ending = true; showImpact('CAUGHT!'); window.setTimeout(() => endRun(false, 'caught'), 650); return; }
   for (const hazard of world.hazards) {
@@ -842,8 +833,8 @@ function handleAction(action: string, id?: string, target?: HTMLElement): void {
   else if (action === 'rotate') { const piece = pieces.find(item => item.id === selected); if (piece && piece.x === null) { piece.rotation = (piece.rotation + 1) % 4; tick(); render(); } }
   else if (action === 'cell' && target) placeAt(Number(target.dataset.x), Number(target.dataset.y));
   else if (action === 'sail') beginRun();
-  else if (action === 'dismiss-sound-tutorial' && run) { run.tutorialOpen = false; save.soundTutorialSeen = true; saveProgress(); renderRun(); notify('Build speed, release to coast, then steer again once clear.'); }
-  else if (action === 'cut-engine' && run) { run.tapTarget = null; run.holding = false; run.pointer = null; run.mouseFollowing = false; heldKeys.clear(); sceneHost.classList.remove('steering'); run.engineOn = false; updateHud(); }
+  else if (action === 'dismiss-sound-tutorial' && run) { run.tutorialOpen = false; save.soundTutorialSeen = true; saveProgress(); renderRun(); notify('Tap ahead, cut the engine to coast, then set another course.'); }
+  else if (action === 'cut-engine' && run) { run.tapTarget = null; run.pointer = null; heldKeys.clear(); run.engineOn = false; updateHud(); }
   else if (action === 'toggle-lights' && run && currentPlan.night && !run.ending) { run.lightsOn = !run.lightsOn; world.setNightLighting(true, run.lightsOn); updateHud(); beep(run.lightsOn ? 660 : 250, .09, 'triangle'); }
   else if (action === 'next') { jobs = []; pieces = []; selected = null; phase = 'board'; render(); }
   else if (action === 'share' && result?.won) {
@@ -943,26 +934,17 @@ view.addEventListener('pointerdown', event => {
 
 window.addEventListener('pointerdown', event => {
   if (phase === 'run' && run && !run.ending && !run.tutorialOpen && run.pointer === null && event.isPrimary && event.button === 0
+    && gameShell.contains(event.target as Node)
     && !(event.target as HTMLElement).closest('button, a, input, select, textarea')) {
-    event.preventDefault();
-    run.pointer = event.pointerId; run.holding = true; run.tapTarget = null;
-    run.mouseFollowing = event.pointerType === 'mouse';
-    run.pointerX = event.clientX; run.pointerY = event.clientY;
-    gameShell.setPointerCapture(event.pointerId);
-    sceneHost.classList.add('steering');
+    run.pointer = event.pointerId;
+    run.pointerStartX = event.clientX; run.pointerStartY = event.clientY;
+    run.pointerDownAt = performance.now(); run.pointerMoved = false;
   }
 }, { capture: true });
 
 window.addEventListener('pointermove', event => {
   if (phase === 'run' && run?.pointer === event.pointerId) {
-    run.pointerX = event.clientX; run.pointerY = event.clientY;
-    return;
-  }
-  if (phase === 'run' && run && !run.ending && !run.tutorialOpen && event.pointerType === 'mouse'
-    && gameShell.contains(event.target as Node)
-    && !(event.target as HTMLElement).closest('button, a, input, select, textarea')) {
-    run.pointerX = event.clientX; run.pointerY = event.clientY;
-    run.mouseFollowing = true; run.tapTarget = null;
+    if (Math.hypot(event.clientX - run.pointerStartX, event.clientY - run.pointerStartY) > 12) run.pointerMoved = true;
     return;
   }
   if (phase !== 'pack') return;
@@ -986,11 +968,13 @@ window.addEventListener('pointermove', event => {
 
 window.addEventListener('pointerup', event => {
   if (phase === 'run' && run?.pointer === event.pointerId) {
-    run.pointerX = event.clientX; run.pointerY = event.clientY;
-    run.mouseFollowing = event.pointerType === 'mouse';
-    run.tapTarget = run.mouseFollowing ? null : steeringPoint(event.clientX, event.clientY);
-    run.holding = false; run.pointer = null; sceneHost.classList.remove('steering');
-    if (gameShell.hasPointerCapture(event.pointerId)) gameShell.releasePointerCapture(event.pointerId);
+    const tapped = !run.pointerMoved
+      && Math.hypot(event.clientX - run.pointerStartX, event.clientY - run.pointerStartY) <= 12
+      && performance.now() - run.pointerDownAt < 700
+      && gameShell.contains(event.target as Node)
+      && !(event.target as HTMLElement).closest('button, a, input, select, textarea');
+    if (tapped && !run.ending && !run.tutorialOpen) run.tapTarget = steeringPoint(event.clientX, event.clientY);
+    run.pointer = null;
     return;
   }
   if (phase === 'pack' && dragPiece) {
@@ -1011,8 +995,7 @@ window.addEventListener('pointerup', event => {
 
 window.addEventListener('pointercancel', event => {
   if (phase === 'run' && run?.pointer === event.pointerId) {
-    run.holding = false; run.pointer = null; run.mouseFollowing = false; sceneHost.classList.remove('steering');
-    if (gameShell.hasPointerCapture(event.pointerId)) gameShell.releasePointerCapture(event.pointerId);
+    run.pointer = null;
   }
   if (phase === 'pack') { dragPiece = null; dragMoved = false; hover = null; updatePackPreview(); }
 });
@@ -1023,14 +1006,14 @@ window.addEventListener('keydown', event => {
     const key = event.key.toLowerCase();
     if (key === 'l' && !event.repeat && currentPlan.night) { event.preventDefault(); handleAction('toggle-lights'); }
     if (['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'a', 'd', 'w', 's'].includes(key)) {
-      event.preventDefault(); heldKeys.add(key); run.tapTarget = null; run.mouseFollowing = false;
+      event.preventDefault(); heldKeys.add(key); run.tapTarget = null;
     }
   }
 });
 window.addEventListener('keyup', event => {
   heldKeys.delete(event.key.toLowerCase());
 });
-window.addEventListener('blur', () => { heldKeys.clear(); if (run) { run.holding = false; run.pointer = null; run.mouseFollowing = false; } sceneHost.classList.remove('steering'); });
+window.addEventListener('blur', () => { heldKeys.clear(); if (run) run.pointer = null; });
 
 soundEl.addEventListener('click', () => { save.sound = !save.sound; saveProgress(); if (save.sound) beep(620); });
 cloudButton.addEventListener('click', () => handleAction('cloud'));
@@ -1039,7 +1022,7 @@ let previous = performance.now();
 function frame(now: number): void {
   const dt = Math.min((now - previous) / 1000, 0.05); previous = now;
   if (phase === 'run') updateRun(dt);
-  const target = run && ((run.holding && run.pointer !== null) || run.mouseFollowing) ? trackingPoint() : run?.tapTarget || null;
+  const target = run?.tapTarget || null;
   world.update(dt, phase === 'run' && !run?.tutorialOpen, run?.x || 0, run?.z || 0, run?.heat || 0, run?.speed || 0, run?.vx || 0, run?.vz || 0, target);
   if (phase === 'run' && currentPlan.night) {
     const darkness = document.getElementById('night-visibility');
