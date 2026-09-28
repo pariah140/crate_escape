@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { HARBORS } from '../src/harbors';
-import { canDock, harborCourseSlope, levelPlan, channelCenter, channelHalfWidth, offshoreState, offshoreWaveStrength, roughWaterPush, currentPush, destinationX, destinationZ, weatherPush } from '../src/levels';
+import { canDock, harborCourseSlope, levelPlan, channelCenter, channelHalfWidth, offshoreState, offshoreWaveStrength, roughWaterPush, currentPush, destinationX, destinationZ, dockingBerth, weatherPush } from '../src/levels';
 
 test('all 25 harbors have distinct fixed coastal routes', () => {
   assert.equal(HARBORS.length, 25);
@@ -73,6 +73,9 @@ test('every harbor has a distinct off-north course and docking requires reaching
     assert.equal(canDock(plan, destinationX(plan), plan.routeEnd), true);
     assert.equal(canDock(plan, destinationX(plan) + 20, plan.routeEnd), false);
     assert.equal(canDock(plan, destinationX(plan), plan.routeEnd - 1), false);
+    assert.equal(dockingBerth(plan).x, destinationX(plan));
+    assert.ok(dockingBerth(plan).z > plan.routeEnd);
+    assert.ok(dockingBerth(plan).z + 3.8 < destinationZ(plan) + 1.6, 'hull clears the pier edge');
   }
 });
 

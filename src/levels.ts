@@ -48,6 +48,10 @@ export function roughWaterPush(plan: LevelPlan, x: number, z: number, time: numb
 }
 export function destinationZ(plan: LevelPlan): number { return plan.routeEnd + 12; }
 export function destinationX(plan: LevelPlan): number { return channelCenter(plan, destinationZ(plan) + 3) + 5.2; }
+/** The berth sits off the water side of the pier, clear of the longest hull. */
+export function dockingBerth(plan: LevelPlan): { x: number; z: number } {
+  return { x: destinationX(plan), z: destinationZ(plan) - 3.2 };
+}
 export function canDock(plan: LevelPlan, x: number, z: number): boolean {
   return z >= plan.routeEnd && Math.abs(x - destinationX(plan)) <= 7;
 }

@@ -61,6 +61,8 @@ The 3D world uses simple directional shadows and layered pastel landforms. UI pa
 
 Rounded rectangular controls echo boat hulls and cargo stickers. Crates use square cells so the packing problem remains clear.
 
+The packing hold stays still while a crate is dragged; its preview and drop use the same centred grid anchor. Invalid drops leave packed crates in place. A two-column desktop workspace keeps the hold and a scrollable crate tray visible together; narrow screens stack the hold above a horizontally scrollable tray. The result screen offers both the next delivery and a direct route to the harbour chart. The docking berth is alongside the pier with enough clearance for the longest hull.
+
 ## Components
 
 All actions are buttons. Primary actions are orange, secondary actions are paper with ink outlines. Feedback appears in the same status slot across board, packing, and result screens. Keyboard focus uses a high-contrast yellow outline.

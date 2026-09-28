@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { patrolPose } from './patrols';
-import { channelCenter, channelHalfWidth, destinationX, destinationZ, harborCourseSlope, levelPlan, offshoreState, offshoreWaveStrength, type HazardKind, type LevelPlan } from './levels';
+import { channelCenter, channelHalfWidth, destinationZ, dockingBerth, harborCourseSlope, levelPlan, offshoreState, offshoreWaveStrength, type HazardKind, type LevelPlan } from './levels';
 import { screenBearing } from './navigation';
 import { HARBORS, type Biome } from './harbors';
 import { BOATS, type BoatDefinition, type BoatStyle } from './model';
@@ -878,7 +878,8 @@ export class World {
   }
 
   beginDocking(x: number, z: number): number {
-    const approach = Math.max(2.2, Math.hypot(x - destinationX(this.plan), z - destinationZ(this.plan)) / 10.5);
+    const berth = dockingBerth(this.plan);
+    const approach = Math.max(2.2, Math.hypot(x - berth.x, z - berth.z) / 10.5);
     this.docking = { fromX: x, fromZ: z, time: 0, approach, parcels: [null, null, null] };
     return approach;
   }
@@ -1024,14 +1025,15 @@ export class World {
     const roughnessTarget = running && !this.inYard ? offshoreState(this.plan, x, z).swell : 0;
     this.seaRoughness += (roughnessTarget - this.seaRoughness) * Math.min(1, dt * 2.2);
     if (this.docking) {
+      const berth = dockingBerth(this.plan);
       this.docking.time += dt;
       const progress = Math.min(1, this.docking.time / this.docking.approach);
       const eased = progress * progress * (3 - 2 * progress);
       const rate = 6 * progress * (1 - progress) / this.docking.approach;
-      x = this.docking.fromX + (destinationX(this.plan) - this.docking.fromX) * eased;
-      z = this.docking.fromZ + (destinationZ(this.plan) - this.docking.fromZ) * eased;
-      vx = (destinationX(this.plan) - this.docking.fromX) * rate;
-      vz = (destinationZ(this.plan) - this.docking.fromZ) * rate;
+      x = this.docking.fromX + (berth.x - this.docking.fromX) * eased;
+      z = this.docking.fromZ + (berth.z - this.docking.fromZ) * eased;
+      vx = (berth.x - this.docking.fromX) * rate;
+      vz = (berth.z - this.docking.fromZ) * rate;
       boatSpeed = Math.hypot(vx, vz);
       target = null;
       running = true;

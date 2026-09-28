@@ -6,6 +6,7 @@ import { PREMIUM_PRODUCTS, PAINTS, ownsPaint, ownsYardTheme, boatChartCost, char
 import { incomingCloudRecord } from './cloud-policy';
 import { World } from './world';
 import { advanceMotion } from './piloting';
+import { dragPlacementAnchor } from './packing';
 import { canDock, channelCenter, currentPush, destinationX, destinationZ, levelPlan, offshoreState, roughWaterPush, weatherPush, type LevelPlan } from './levels';
 import { screenArrow } from './navigation';
 import { heardBySoundPatrol, inVisionCone, sightProfile } from './patrols';
@@ -74,6 +75,9 @@ let selected: string | null = null;
 let hover: { x: number; y: number } | null = null;
 let dragPiece: string | null = null;
 let dragMoved = false;
+let dragStartX = 0;
+let dragStartY = 0;
+let suppressPackClick = false;
 let run: RunState | null = null;
 let result: { won: boolean; reason: string; payout: number; base: number; bonus: number; challengeBonus: number; adjustment: number; service: number; rep: number } | null = null;
 let toastTimer = 0;
@@ -318,36 +322,49 @@ function renderShape(shape: Piece['shape'], rotation: number): string {
 }
 
 function renderPack(): void {
+  const previousScroll = view.querySelector<HTMLElement>('.pack-panel')?.scrollTop ?? 0;
+  const previousTray = view.querySelector<HTMLElement>('.crate-tray');
+  const previousTrayScrollX = previousTray?.scrollLeft ?? 0;
+  const previousTrayScrollY = previousTray?.scrollTop ?? 0;
   const selectedPiece = pieces.find(piece => piece.id === selected && piece.x === null);
   const packed = pieces.filter(piece => piece.x !== null).length;
   const filled = pieces.reduce((sum, piece) => sum + occupiedCells(piece).length, 0);
   const total = holdCapacity();
-  const preview = new Set<string>();
-  let previewValid = false;
-  if (selectedPiece && hover) {
-    const { x: hoverX, y: hoverY } = hover;
-    previewValid = canPlace(selectedPiece, hoverX, hoverY, pieces, holdWidth(), holdHeight(), boat().blocked);
-    rotatedCells(selectedPiece.shape, selectedPiece.rotation).forEach(([cx, cy]) => preview.add(`${hoverX + cx},${hoverY + cy}`));
-  }
   const cells = Array.from({ length: holdWidth() * holdHeight() }, (_, i) => {
     const x = i % holdWidth(), y = Math.floor(i / holdWidth());
     if (isBlocked(x, y, boat().blocked)) return `<div class="hold-cell hold-blocked" aria-label="Hull wall, no cargo space"></div>`;
     const owner = ownerAt(x, y); const job = owner ? jobById(owner.jobId) : undefined;
-    const isPreview = preview.has(`${x},${y}`);
     const label = owner ? `${job?.cargo || 'Crate'}; tap to pick up` : `Empty hold cell, column ${x + 1}, row ${y + 1}`;
-    return `<button class="hold-cell ${owner ? 'filled' : ''} ${isPreview ? previewValid ? 'preview-valid' : 'preview-invalid' : ''}" type="button" data-action="cell" data-x="${x}" data-y="${y}" style="--cell-color:${job?.color || '#e7cda5'}" aria-label="${escapeHtml(label)}">${owner ? `<span>${job?.icon || '■'}</span>` : '<span aria-hidden="true">+</span>'}</button>`;
+    return `<button class="hold-cell ${owner ? 'filled' : ''}" type="button" data-action="cell" data-x="${x}" data-y="${y}" style="--cell-color:${job?.color || '#e7cda5'}" aria-label="${escapeHtml(label)}">${owner ? `<span>${job?.icon || '■'}</span>` : '<span aria-hidden="true">+</span>'}</button>`;
   }).join('');
   const unpacked = pieces.filter(piece => piece.x === null);
   view.innerHTML = `<main class="side-panel pack-panel" aria-label="Cargo hold">
-    ${headerStep('02 / MAKE IT FIT', 'Pack the hold', 'Tap a crate, then a square. Dragging works too. Rotate awkward pieces before placing.')}
+    ${headerStep('02 / MAKE IT FIT', 'Pack the hold', 'Tap a crate, then a square. You can also drag a crate onto the hold.')}
     <div class="hold-header"><div><span class="eyebrow">${boat().name.toUpperCase()} · ${holdWidth()} × ${holdHeight()} HOLD</span><strong>${filled} / ${total} cells filled</strong></div><div class="fill-ring" style="--fill:${filled / total * 100}%"><span>${Math.round(filled / total * 100)}%</span></div></div>
-    <div class="hold-wrap"><div id="hold-grid" class="hold-grid" style="--cols:${holdWidth()}">${cells}</div><div class="hold-bow" aria-hidden="true">▲ BOW</div></div>
-    <div class="pack-help"><span>☝ Pick up: tap a packed crate</span><span>↻ Rotate: button or R</span></div>
-    <div class="tray-heading"><span>CRATE TRAY</span><span>${packed}/${pieces.length} PACKED</span></div>
-    <div class="crate-tray">${unpacked.length ? unpacked.map(piece => { const job = jobById(piece.jobId)!; return `<button class="crate-chip ${selected === piece.id ? 'selected' : ''}" style="--cargo:${job.color}" type="button" data-action="select-piece" data-id="${piece.id}" aria-pressed="${selected === piece.id}" aria-label="Select ${SHAPE_NAMES[piece.shape]} ${job.cargo} crate">${renderShape(piece.shape, piece.rotation)}<span><strong>${escapeHtml(job.cargo)}</strong><small>${SHAPE_NAMES[piece.shape]}</small></span></button>`; }).join('') : '<div class="tray-empty">Everything is tucked in. Nice packing.</div>'}</div>
+    <div class="pack-workspace"><div class="pack-hold-column"><div class="hold-wrap"><div id="hold-grid" class="hold-grid" style="--cols:${holdWidth()}">${cells}</div><div class="hold-bow" aria-hidden="true">▲ BOW</div></div>
+    <div class="pack-help"><span>☝ Pick up: tap a packed crate</span><span>↻ Rotate: button or R</span></div></div>
+    <div class="pack-tray-column"><div class="tray-heading"><span>CRATE TRAY</span><span>${packed}/${pieces.length} PACKED${unpacked.length > 2 ? ' · SCROLL FOR MORE' : ''}</span></div>
+    <div class="crate-tray" aria-label="Unpacked cargo; scroll to see every crate">${unpacked.length ? unpacked.map(piece => { const job = jobById(piece.jobId)!; return `<button class="crate-chip ${selected === piece.id ? 'selected' : ''}" style="--cargo:${job.color}" type="button" data-action="select-piece" data-id="${piece.id}" aria-pressed="${selected === piece.id}" aria-label="Select ${SHAPE_NAMES[piece.shape]} ${job.cargo} crate">${renderShape(piece.shape, piece.rotation)}<span><strong>${escapeHtml(job.cargo)}</strong><small>${SHAPE_NAMES[piece.shape]}</small></span></button>`; }).join('') : '<div class="tray-empty">Everything is tucked in. Nice packing.</div>'}</div></div></div>
     <div class="pack-actions"><button class="secondary-button" type="button" data-action="rotate" ${selectedPiece ? '' : 'disabled'}>↻ Rotate crate</button><button class="primary-button" type="button" data-action="sail" ${packed === pieces.length && pieces.length ? '' : 'disabled'}>Set sail <span>→</span></button></div>
     <div class="pack-footer"><button class="text-button" type="button" data-action="board">← Back to jobs</button><span>${filled === total ? '★ PERFECT PACK +10%' : `${total - filled} spaces left · fill them for +10%`}</span></div>
   </main><div class="scene-caption"><span class="caption-badge">CARGO MANIFEST</span><strong>Every square counts.</strong><span>Perfect Pack pays 10% extra.</span></div>`;
+  view.querySelector<HTMLElement>('.pack-panel')!.scrollTop = previousScroll;
+  const tray = view.querySelector<HTMLElement>('.crate-tray')!;
+  tray.scrollLeft = previousTrayScrollX;
+  tray.scrollTop = previousTrayScrollY;
+  updatePackPreview();
+}
+
+function updatePackPreview(): void {
+  const piece = pieces.find(item => item.id === selected && item.x === null);
+  const anchor = hover;
+  const valid = Boolean(piece && anchor && canPlace(piece, anchor.x, anchor.y, pieces, holdWidth(), holdHeight(), boat().blocked));
+  const cells = new Set(piece && anchor ? rotatedCells(piece.shape, piece.rotation).map(([x, y]) => `${anchor.x + x},${anchor.y + y}`) : []);
+  view.querySelectorAll<HTMLElement>('#hold-grid [data-action="cell"]').forEach(cell => {
+    const isPreview = cells.has(`${cell.dataset.x},${cell.dataset.y}`);
+    cell.classList.toggle('preview-valid', isPreview && valid);
+    cell.classList.toggle('preview-invalid', isPreview && !valid);
+  });
 }
 
 function renderRun(): void {
@@ -374,6 +391,7 @@ function renderResult(): void {
     <p>${result.won ? 'The cargo is ashore and nobody asked any questions.' : 'The cargo is gone. Your boat is back at the yard for repairs; its upgrades are safe.'}</p>
     ${result.won ? `<div class="receipt"><div><span>Cargo pay</span><strong>${money(result.base)}</strong></div><div><span>Perfect pack</span><strong>+${money(result.bonus)}</strong></div><div><span>Charter challenge</span><strong>+${money(result.challengeBonus)}</strong></div>${result.adjustment ? `<div><span>Cargo wear / delay</span><strong>−${money(result.adjustment)}</strong></div>` : ''}<div><span>Harbour service · 10%</span><strong>−${money(result.service)}</strong></div><div class="receipt-total"><span>Cash earned</span><strong>${money(result.payout)}</strong></div></div><div class="rep-note">★ +${result.rep} reputation · charter progress saved</div>` : `<div class="failure-note">No payout this time · -${Math.abs(result.rep)} reputation</div>`}
     <button class="primary-button" type="button" data-action="next">${result.won ? 'Next delivery' : 'Try again'} <span>→</span></button>
+    <button class="secondary-button full" type="button" data-action="map">Harbour chart →</button>
     ${result.won ? '<button class="secondary-button full share-button" type="button" data-action="share">Share this run ↗</button>' : ''}
     <button class="text-button" type="button" data-action="yard">Visit the shipyard ↗</button>
   </div></main>`;
@@ -564,9 +582,10 @@ function removeJob(id: string): void {
   tick(); render(); notify('Job removed from the manifest.');
 }
 
-function placeAt(x: number, y: number): void {
+function placeAt(x: number, y: number, dragged = false): void {
   const owner = ownerAt(x, y);
   if (owner) {
+    if (dragged) { notify('That square is occupied. Drop the crate on clear space.', 'danger'); return; }
     owner.x = null; owner.y = null; selected = owner.id; hover = null; tick(); render();
     notify('Crate picked up. Tap a new square to move it.'); return;
   }
@@ -909,6 +928,7 @@ function finishBuyingBoat(index: number): void {
 }
 
 view.addEventListener('click', event => {
+  if (suppressPackClick && phase === 'pack') { event.preventDefault(); suppressPackClick = false; return; }
   const target = (event.target as HTMLElement).closest<HTMLElement>('[data-action]');
   if (target && !((target as HTMLButtonElement).disabled)) handleAction(target.dataset.action!, target.dataset.id, target);
 });
@@ -920,7 +940,7 @@ sceneHost.addEventListener('click', event => {
 
 view.addEventListener('pointerdown', event => {
   const target = (event.target as HTMLElement).closest<HTMLElement>('[data-action="select-piece"]');
-  if (phase === 'pack' && target) { dragPiece = target.dataset.id!; dragMoved = false; }
+  if (phase === 'pack' && target) { dragPiece = target.dataset.id!; dragMoved = false; dragStartX = event.clientX; dragStartY = event.clientY; }
 });
 
 window.addEventListener('pointerdown', event => {
@@ -943,10 +963,22 @@ window.addEventListener('pointermove', event => {
     return;
   }
   if (phase !== 'pack') return;
-  const el = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('.hold-cell');
-  if (dragPiece) { dragMoved = true; if (selected !== dragPiece) selected = dragPiece; }
-  const next = el ? { x: Number(el.dataset.x), y: Number(el.dataset.y) } : null;
-  if (next?.x !== hover?.x || next?.y !== hover?.y) { hover = next; renderPack(); }
+  const cell = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-action="cell"]');
+  if (dragPiece && Math.hypot(event.clientX - dragStartX, event.clientY - dragStartY) > 6) {
+    dragMoved = true;
+    if (selected !== dragPiece) {
+      selected = dragPiece;
+      view.querySelectorAll<HTMLElement>('.crate-chip').forEach(chip => {
+        const active = chip.dataset.id === selected;
+        chip.classList.toggle('selected', active);
+        chip.setAttribute('aria-pressed', String(active));
+      });
+    }
+  }
+  const piece = dragMoved ? pieces.find(item => item.id === dragPiece) : null;
+  const next = cell ? piece ? dragPlacementAnchor(piece, Number(cell.dataset.x), Number(cell.dataset.y), holdWidth(), holdHeight())
+    : { x: Number(cell.dataset.x), y: Number(cell.dataset.y) } : null;
+  if (next?.x !== hover?.x || next?.y !== hover?.y) { hover = next; updatePackPreview(); }
 });
 
 window.addEventListener('pointerup', event => {
@@ -958,8 +990,17 @@ window.addEventListener('pointerup', event => {
     return;
   }
   if (phase === 'pack' && dragPiece) {
-    const cell = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('.hold-cell');
-    if (cell && dragMoved) { selected = dragPiece; placeAt(Number(cell.dataset.x), Number(cell.dataset.y)); }
+    if (dragMoved) {
+      suppressPackClick = true;
+      window.setTimeout(() => { suppressPackClick = false; }, 0);
+      const cell = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-action="cell"]');
+      const piece = pieces.find(item => item.id === dragPiece);
+      if (cell && piece) {
+        selected = dragPiece;
+        const anchor = dragPlacementAnchor(piece, Number(cell.dataset.x), Number(cell.dataset.y), holdWidth(), holdHeight());
+        placeAt(anchor.x, anchor.y, true);
+      }
+    }
     dragPiece = null;
   }
 });
@@ -969,6 +1010,7 @@ window.addEventListener('pointercancel', event => {
     run.holding = false; run.pointer = null; sceneHost.classList.remove('steering');
     if (gameShell.hasPointerCapture(event.pointerId)) gameShell.releasePointerCapture(event.pointerId);
   }
+  if (phase === 'pack') { dragPiece = null; dragMoved = false; hover = null; updatePackPreview(); }
 });
 
 window.addEventListener('keydown', event => {
