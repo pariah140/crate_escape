@@ -15,6 +15,8 @@ test('all 25 harbors have distinct fixed coastal routes', () => {
     const later = levelPlan(145, port);
     assert.equal(first.port, port);
     assert.equal(channelCenter(first, 210), channelCenter(later, 210));
+    assert.equal(destinationX(first), destinationX(later));
+    assert.equal(destinationZ(first), destinationZ(later));
     assert.notEqual(destinationX(first), destinationX(levelPlan(1, (port + 1) % HARBORS.length)));
   }
 });
@@ -26,7 +28,7 @@ test('voyages continue beyond 100 while adding hazards and later mission feature
   const distant = levelPlan(1001, 24);
   assert.deepEqual(levelPlan(145, 2), levelPlan(145, 2));
   assert.ok(late.hazards.length > early.hazards.length);
-  assert.ok(early.routeEnd < late.routeEnd);
+  assert.equal(early.routeEnd, late.routeEnd);
   assert.ok(levelPlan(1, 0).routeEnd < levelPlan(1, 12).routeEnd);
   assert.ok(levelPlan(1, 12).routeEnd < levelPlan(1, 24).routeEnd);
   assert.equal(endless.number, 101);

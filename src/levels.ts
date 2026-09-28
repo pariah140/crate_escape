@@ -58,7 +58,9 @@ export function levelPlan(number: number, port: number): LevelPlan {
   const harbor = HARBORS[harborIndex];
   const region = Math.floor(harborIndex / 5);
   const tier = Math.min(1, (level - 1) / 99);
-  const routeEnd = Math.min(670, 185 + harborIndex * 11 + Math.min(100, level - 1) * 2.1);
+  // A harbour's destination is a place on its chart, not a moving voyage target.
+  // Later harbours are longer; repeat voyages change the encounters and conditions.
+  const routeEnd = 185 + harborIndex * 11;
   const channelWidth = 20 - tier * 3.3 - region * .35 + (harborIndex % 3) * .3;
   const rockCount = Math.min(20, 3 + Math.floor((level - 1) / 10) + Math.floor(harborIndex / 4) + (harbor.biome === 'cliff' || harbor.biome === 'volcanic' ? 2 : 0));
   const sandCount = level < 8 && harborIndex < 2 ? 0 : Math.min(9, 1 + Math.floor(Math.max(0, level - 8) / 15) + Math.floor(region / 2) + (harbor.biome === 'reef' ? 2 : harbor.biome === 'ice' ? 1 : 0));

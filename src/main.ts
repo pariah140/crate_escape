@@ -479,12 +479,26 @@ function renderMarket(): void {
 
 function harborMiniRoute(index: number): string {
   const plan = levelPlan(1, index);
-  const scale = 40 / Math.max(80, Math.abs(channelCenter(plan, plan.routeEnd)));
-  const points = Array.from({ length: 13 }, (_, i) => {
-    const z = i * plan.routeEnd / 12;
-    return `${(50 + channelCenter(plan, z) * scale).toFixed(1)},${(92 - i * 7).toFixed(1)}`;
-  }).join(' ');
-  return `<svg class="map-mini-route" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polyline points="${points}" fill="none" stroke="#fff8df" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" opacity=".84"/><polyline points="${points}" fill="none" stroke="#398b94" stroke-width="2" stroke-dasharray="2 3"/><circle cx="50" cy="92" r="3" fill="#f8ce6a"/><circle cx="${(50 + channelCenter(plan, plan.routeEnd) * scale).toFixed(1)}" cy="8" r="3" fill="#f78c70"/></svg>`;
+  const portZ = destinationZ(plan);
+  const course = Array.from({ length: 17 }, (_, i) => channelCenter(plan, i * portZ / 16));
+  const portX = destinationX(plan);
+  const scale = 33 / Math.max(30, ...course.map(Math.abs), Math.abs(portX));
+  const chartX = (x: number) => (50 + x * scale).toFixed(1);
+  const points = course.map((x, i) => `${chartX(x)},${(87 - i * 70 / 16).toFixed(1)}`).join(' ');
+  const dockX = chartX(portX);
+  const labelX = Number(dockX) > 67 ? Number(dockX) - 6 : Number(dockX) + 6;
+  const labelSide = Number(dockX) > 67 ? 'end' : 'start';
+  return `<svg class="map-mini-route" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M3 20q5 -3 10 0m73 8q5 -3 10 0M5 57q5 -3 10 0m76 7q5 -3 10 0M8 83q5 -3 10 0m68 -37q5 -3 10 0" fill="none" stroke="#e0f5e8" stroke-width=".8" opacity=".65"/>
+    <polyline points="${points}" fill="none" stroke="#f5efd5" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" opacity=".7"/>
+    <polyline points="${points}" fill="none" stroke="#326f80" stroke-width="1.3" stroke-dasharray="1.8 2.4"/>
+    <line x1="${chartX(course.at(-1)!)}" y1="17" x2="${dockX}" y2="13" stroke="#f5efd5" stroke-width="2"/>
+    <circle cx="${dockX}" cy="13" r="5" fill="var(--harbor-color)" stroke="#fff8df" stroke-width="1.5"/>
+    <circle cx="${dockX}" cy="13" r="1.7" fill="#fff8df"/>
+    <text x="${labelX}" y="15.5" text-anchor="${labelSide}" class="map-mini-label">PORT</text>
+    <circle cx="50" cy="87" r="3.1" fill="#f8ce6a" stroke="#fff8df" stroke-width="1"/>
+    <text x="55.5" y="89.5" class="map-mini-label">START</text>
+  </svg>`;
 }
 
 function renderMap(): void {
@@ -501,7 +515,7 @@ function renderMap(): void {
     return `<article class="map-stop ${unlocked ? 'unlocked' : 'locked'} ${current ? 'current' : ''}" style="--harbor-color:${harbor.color}">
       <div class="map-island" aria-hidden="true"><span>${harbor.icon}</span></div>
       <div class="map-stop-body"><span class="eyebrow">HARBOR ${String(index + 1).padStart(2, '0')} · ${current ? 'CURRENT PORT' : unlocked ? 'UNLOCKED' : 'LOCKED'}</span><h2>${harbor.name}</h2><p>${harbor.subtitle}</p>
-      <div class="map-mini" title="Unique ${harbor.biome} route map">${harborMiniRoute(index)}<span>${harbor.biome.toUpperCase()} ROUTE</span></div>
+      <div class="map-mini" role="img" aria-label="Fixed ${harbor.name} course from start to destination port; voyage hazards change">${harborMiniRoute(index)}<span>${harbor.biome.toUpperCase()} WATERS</span></div>
       <small>${index === 0 ? 'Open from the start' : `Unlock: ${requirements}`}</small>
       ${!unlocked && index > 0 ? `<div class="charter-progress"><strong>${Math.min(record?.deliveries ?? 0, gate.runs)}/${gate.runs} deliveries</strong><span>${Math.min(record?.cargoKinds.length ?? 0, 2)}/2 cargo types · ${record?.clean ? '✓ clean run' : 'clean run needed'}</span></div>` : ''}
       ${missing.length ? `<div class="map-missing">Still needed: ${missing.join(' · ')}</div>` : ''}
@@ -514,7 +528,7 @@ function renderMap(): void {
   const regions = Array.from({ length: 5 }, (_, region) => `<section class="map-region"><div class="map-region-head"><span>CHART ${region + 1} / 5</span><strong>${regionNames[region]}</strong><small>Harbours ${String(region * 5 + 1).padStart(2, '0')}–${String(region * 5 + 5).padStart(2, '0')}</small></div><div class="map-stops">${stops.slice(region * 5, region * 5 + 5).join('')}</div></section>`).join('');
   view.innerHTML = `<main class="atlas-screen map-screen" aria-label="Harbor progression map"><div class="atlas-wrap">
     <div class="atlas-top"><button class="atlas-back" type="button" data-action="board">← Job board</button><span>✦ THE HARBOR CHART</span><button class="atlas-back" type="button" data-action="market">Boat market →</button></div>
-    <div class="atlas-heading"><span class="eyebrow">25 DISTINCT COASTS · ENDLESS VOYAGES</span><h1>Harbors ahead.</h1><p>Each harbor has its own coastline, route bends, landmarks and cargo. Unlock them in order, then sail any open harbor as voyages keep changing.</p></div>
+    <div class="atlas-heading"><span class="eyebrow">25 DISTINCT COASTS · ENDLESS VOYAGES</span><h1>Harbors ahead.</h1><p>Each chart shows a fixed course from START to PORT. The destination stays put; patrols, hazards and conditions change between voyages. You can steer into open water on either side.</p></div>
     <div class="map-chart">${regions}</div>
     <div class="map-legend"><span><i class="legend-open"></i> Open harbor</span><span><i class="legend-locked"></i> Locked harbor</span><span>★ ${Math.floor(save.reputation)} reputation</span><span>${save.unlockedPorts.length} / ${HARBORS.length} discovered</span></div>
     <div class="atlas-bottom"><button class="secondary-button" type="button" data-action="yard">← Shipyard</button><button class="secondary-button" type="button" data-action="board">Job board →</button></div>
