@@ -411,12 +411,12 @@ button:active:not(:disabled) { transform: translateY(2px); }
 .yard-hold i.hull-wall { background: #744632; }
 .fleet-facts { display: flex; flex-wrap: wrap; gap: 4px 10px; color: #546e6f; font: 800 9px ui-monospace, monospace; }
 .fleet-facts strong { color: var(--ink); }
-.fleet-card > button { min-height: 33px; padding: 5px 10px; font-size: 11px; }
+.fleet-card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.fleet-card-actions > button { flex: 1 1 115px; min-height: 33px; padding: 5px 10px; font-size: 11px; }
 .fleet-active-label { display: inline-block; padding: 5px 7px; border-radius: 6px; background: #c8e8b9; color: #28735d; font: 900 10px ui-monospace, monospace; }
-.inspection-card { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; padding: 13px; margin-bottom: 10px; border: 2px solid #cbad81; border-radius: 13px; background: #fff0ce; }
+.inspection-card { display: grid; gap: 6px; padding: 13px; margin-bottom: 10px; border: 2px solid #cbad81; border-radius: 13px; background: #fff0ce; }
 .inspection-card strong { font-size: 17px; }
 .inspection-card span { font-size: 10px; font-weight: 800; color: #476a6e; }
-.inspection-card button, .inspection-card .fleet-active-label { grid-column: 2; grid-row: 1 / 4; align-self: center; }
 .yard-back { border: 0; background: none; color: #3f777b; font: 900 9px ui-monospace, monospace; }
 .yard-select-note, .backup-note { padding: 13px; border: 2px dashed #b7b8a3; border-radius: 12px; background: #f4f0dc; color: #547070; font-size: 11px; font-weight: 800; line-height: 1.45; }
 .boat-repair-warning { padding: 10px 12px; margin: 10px 0; border: 2px solid #d5906b; border-radius: 10px; background: #ffdcc0; font-size: 11px; font-weight: 800; }

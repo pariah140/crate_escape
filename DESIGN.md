@@ -71,7 +71,7 @@ Do make the next game action obvious and leave the world visible. Do give a tap 
 
 ## Fleet and shipyard
 
-Each boat has a different low poly hull silhouette, cabin equipment, cargo footprint, acceleration and turn rate. Larger hulls move deliberately through turns. The shipyard is a distinct quay scene displaying owned boats at berths. Fleet cards repeat the exact usable cell footprint from the packing view and make speed, handling, condition and prices legible. Boat refits stay with that boat; the workshop and broker's desk benefit the whole fleet.
+Each boat has a different low poly hull silhouette, cabin equipment, cargo footprint, acceleration and turn rate. Larger hulls move deliberately through turns. The shipyard is a distinct quay scene displaying owned boats at berths. Fleet cards repeat the exact usable cell footprint from the packing view and make speed, handling, condition and prices legible. Each owned boat card offers direct selection; the inspection panel is for status, repair and refits. Boat refits stay with that boat; the workshop and broker's desk benefit the whole fleet.
 
 ## Marketplace and harbor chart
 
