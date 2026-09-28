@@ -888,7 +888,13 @@ export class World {
     const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
     const hit = this.raycaster.ray.intersectPlane(this.waterPlane, new THREE.Vector3());
-    return hit ? { x: hit.x, z: hit.z } : { x: this.boat.position.x, z: this.boat.position.z };
+    if (hit) return { x: hit.x, z: hit.z };
+    // The top edge of the view can look past the water-plane horizon. Keep
+    // steering in that screen direction instead of silently targeting the boat.
+    const direction = this.raycaster.ray.direction;
+    const length = Math.hypot(direction.x, direction.z) || 1;
+    return { x: this.boat.position.x + direction.x / length * 90,
+      z: this.boat.position.z + direction.z / length * 90 };
   }
 
   screenBearing(dx: number, dz: number): number {

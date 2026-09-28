@@ -14,7 +14,7 @@ Open the local URL printed by Vite. The browser saves progress on that device. T
 ## Controls
 
 - **Packing:** select a crate, tap a grid cell to place it, or drag it onto the hold. Rotate with the button or `R`. Tap a placed crate to pick it up.
-- **Driving:** tap a spot on the water to move there, or drag across the water to pull the boat in that direction. The boat eases into motion and coasts after release. It stays still until you steer. Arrow keys / WASD also work.
+- **Driving:** tap a spot on the water to move there, or hold ahead of the boat and move your finger to steer continuously as the camera follows. The boat eases into motion and coasts after release. It stays still until you steer. Arrow keys / WASD also work.
 - **Goal:** reach the destination with hull left. A full hold earns a 10% Perfect Pack bonus.
 
 ## Build

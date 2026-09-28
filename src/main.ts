@@ -62,7 +62,6 @@ interface RunState {
   contact: number; damageCooldown: number; collisions: number; elapsed: number;
   holding: boolean; pointer: number | null; pointerX: number; pointerY: number;
   pointerStartX: number; pointerStartY: number; pointerDownAt: number; pointerMoved: boolean;
-  dragOriginX: number; dragOriginZ: number;
   tapTarget: { x: number; z: number } | null; deadline: number; patrolHeat: number; hotCargo: boolean; ending: boolean;
   heading: number; engineOn: boolean; lightsOn: boolean; tutorialOpen: boolean; tutorialPending: boolean; soundExposure: number; offshoreTime: number;
 }
@@ -360,7 +359,7 @@ function renderRun(): void {
     <div id="sea-warning" class="sea-warning" role="status" aria-live="polite"></div>
     <div id="port-compass" class="port-compass" role="img" aria-label="View compass for boat and destination"><div class="compass-face" aria-hidden="true"><span id="compass-north" class="compass-n">N</span><span id="compass-port" class="compass-port-marker"></span><span id="compass-needle" class="compass-boat-marker"></span><span class="compass-hub"></span></div><div class="compass-copy"><span class="compass-eyebrow">VIEW COMPASS</span><span class="heading-label">BOAT <b id="heading-arrow" class="compass-arrow">↑</b></span><span class="port-label">PORT <b id="port-arrow" class="compass-arrow">↑</b><small id="port-distance">${Math.round(currentPlan.routeEnd)} m</small></span><strong>${escapeHtml(HARBORS[currentPlan.port].name.toUpperCase())}</strong></div></div>
     <div class="engine-controls"><div id="engine-status" class="engine-status">ENGINE IDLE</div>${currentPlan.night ? `<button id="light-toggle" class="light-toggle" type="button" data-action="toggle-lights" aria-pressed="${run?.lightsOn ? 'true' : 'false'}" aria-label="Toggle boat lights">☼ LIGHTS ON</button>` : ''}<button class="cut-engine" type="button" data-action="cut-engine" aria-label="Cut engine and coast">✦ CUT ENGINE</button></div>
-    <div class="run-bottom"><div class="run-instruction"><strong id="run-instruction-title">DRAG TO PILOT</strong><span id="run-instruction-detail">Tap a spot or drag · release to coast</span></div><div id="run-timer" class="run-timer">00:00</div></div>
+    <div class="run-bottom"><div class="run-instruction"><strong id="run-instruction-title">HOLD AHEAD TO PILOT</strong><span id="run-instruction-detail">Move your finger to steer · lift to coast · tap to sail to a spot</span></div><div id="run-timer" class="run-timer">00:00</div></div>
     ${run?.tutorialOpen ? `<div class="sound-tutorial"><div class="sound-card"><span class="eyebrow">NEW PATROL · ACOUSTIC LISTENING</span><h2>Quiet waters, loud engines.</h2><div class="sound-demo" aria-hidden="true"><span class="demo-boat">🚤</span><span class="demo-wave wave-one"></span><span class="demo-wave wave-two"></span><span class="demo-patrol">◉</span></div><p>Build speed before its listening ring. Then release the drag or tap target to cut the engine and coast silently through. You can steer again once clear.</p><button class="primary-button full" type="button" data-action="dismiss-sound-tutorial">Got it · set sail →</button></div></div>` : ''}
   </main>`;
   updateHud();
@@ -590,7 +589,7 @@ function beginRun(): void {
   const maxHull = boat().hull + boatUpgrade(save).hull * 15;
   const patrolHeat = jobs.reduce((sum, job) => sum + job.heat, 0);
   const hotCargo = jobs.some(job => job.kind === 'hot');
-  run = { x: 0, z: 0, vx: 0, vz: 0, speed: 0, hull: maxHull * (save.boatCondition[save.boat] ?? 100) / 100, maxHull, heat: Math.min(65, patrolHeat * 4 + (hotCargo ? 8 : 0)), contact: 0, damageCooldown: 0, collisions: 0, elapsed: 0, holding: false, pointer: null, pointerX: 0, pointerY: 0, pointerStartX: 0, pointerStartY: 0, pointerDownAt: 0, pointerMoved: false, dragOriginX: 0, dragOriginZ: 0, tapTarget: null, deadline: jobs.some(job => job.kind === 'perishable') ? (25 + currentPlan.routeEnd / 5.2) * boatTraits(boat()).deadline : Infinity, patrolHeat, hotCargo, ending: false, heading: 0, engineOn: false, lightsOn: currentPlan.night, tutorialOpen: false, tutorialPending: currentPlan.patrols.some(patrol => patrol.sound) && !save.soundTutorialSeen, soundExposure: 0, offshoreTime: 0 };
+  run = { x: 0, z: 0, vx: 0, vz: 0, speed: 0, hull: maxHull * (save.boatCondition[save.boat] ?? 100) / 100, maxHull, heat: Math.min(65, patrolHeat * 4 + (hotCargo ? 8 : 0)), contact: 0, damageCooldown: 0, collisions: 0, elapsed: 0, holding: false, pointer: null, pointerX: 0, pointerY: 0, pointerStartX: 0, pointerStartY: 0, pointerDownAt: 0, pointerMoved: false, tapTarget: null, deadline: jobs.some(job => job.kind === 'perishable') ? (25 + currentPlan.routeEnd / 5.2) * boatTraits(boat()).deadline : Infinity, patrolHeat, hotCargo, ending: false, heading: 0, engineOn: false, lightsOn: currentPlan.night, tutorialOpen: false, tutorialPending: currentPlan.patrols.some(patrol => patrol.sound) && !save.soundTutorialSeen, soundExposure: 0, offshoreTime: 0 };
   world.setNightLighting(currentPlan.night, run.lightsOn);
   heldKeys.clear(); phase = 'run'; render(); beep(400, 0.15, 'triangle'); notify('Cargo aboard. Tap the water or drag to pilot!', 'success');
 }
@@ -693,13 +692,10 @@ function steeringPoint(clientX: number, clientY: number): { x: number; z: number
 }
 
 function dragPoint(): { x: number; z: number } | null {
-  if (!run?.holding || !run.pointerMoved) return null;
-  const start = world.screenToWater(run.pointerStartX, run.pointerStartY);
-  const current = world.screenToWater(run.pointerX, run.pointerY);
-  return {
-    x: run.dragOriginX + current.x - start.x,
-    z: run.dragOriginZ + current.z - start.z,
-  };
+  if (!run?.holding) return null;
+  // Reproject every frame: as the camera follows the boat, a held finger keeps
+  // pointing to water ahead instead of becoming a fixed, short world offset.
+  return steeringPoint(run.pointerX, run.pointerY);
 }
 
 function updateRun(dt: number): void {
@@ -760,8 +756,8 @@ function updateRun(dt: number): void {
   const title = document.getElementById('run-instruction-title');
   const detail = document.getElementById('run-instruction-detail');
   if (title && detail && !run.ending) {
-    title.textContent = heard ? 'SONAR HEARS YOU' : run.z > currentPlan.routeEnd - 22 ? 'PORT APPROACH' : newOffshore.zone === 'rough' || newOffshore.zone === 'danger' ? 'ROUGH WATER' : !run.engineOn && currentPlan.patrols.some(p => p.sound) ? 'SILENT GLIDE' : currentPlan.weather === 'storm' ? 'HEAVY WEATHER' : 'DRAG TO PILOT';
-    detail.textContent = heard ? 'Release to cut the engine and coast' : run.z > currentPlan.routeEnd - 22 ? 'Follow the compass and line up with the pier' : newOffshore.zone === 'rough' || newOffshore.zone === 'danger' ? 'Waves buffet the hull · steering responds more slowly' : !run.engineOn && currentPlan.patrols.some(p => p.sound) ? 'Momentum carries you past listening patrols' : currentPlan.currents.some(c => Math.hypot(run!.x - c.x, run!.z - c.z) < c.radius) ? 'Strong current · steer against the flow' : currentPlan.night ? run.lightsOn ? 'Lights reveal hazards · patrols can spot you sooner · L to toggle' : 'Dark water hides hazards · L to switch lights on' : 'Tap a spot or drag · release to coast';
+    title.textContent = heard ? 'SONAR HEARS YOU' : run.z > currentPlan.routeEnd - 22 ? 'PORT APPROACH' : newOffshore.zone === 'rough' || newOffshore.zone === 'danger' ? 'ROUGH WATER' : !run.engineOn && currentPlan.patrols.some(p => p.sound) ? 'SILENT GLIDE' : currentPlan.weather === 'storm' ? 'HEAVY WEATHER' : 'HOLD AHEAD TO PILOT';
+    detail.textContent = heard ? 'Release to cut the engine and coast' : run.z > currentPlan.routeEnd - 22 ? 'Follow the compass and line up with the pier' : newOffshore.zone === 'rough' || newOffshore.zone === 'danger' ? 'Waves buffet the hull · steering responds more slowly' : !run.engineOn && currentPlan.patrols.some(p => p.sound) ? 'Momentum carries you past listening patrols' : currentPlan.currents.some(c => Math.hypot(run!.x - c.x, run!.z - c.z) < c.radius) ? 'Strong current · steer against the flow' : currentPlan.night ? run.lightsOn ? 'Lights reveal hazards · patrols can spot you sooner · L to toggle' : 'Dark water hides hazards · L to switch lights on' : 'Move your finger to steer · lift to coast · tap to sail to a spot';
   }
   if (run.contact >= 1.5 || run.soundExposure >= 1.8 || run.heat >= 100) { run.ending = true; showImpact('CAUGHT!'); window.setTimeout(() => endRun(false, 'caught'), 650); return; }
   for (const hazard of world.hazards) {
@@ -935,7 +931,7 @@ window.addEventListener('pointerdown', event => {
     run.pointerX = event.clientX; run.pointerY = event.clientY;
     run.pointerStartX = event.clientX; run.pointerStartY = event.clientY;
     run.pointerDownAt = performance.now(); run.pointerMoved = false;
-    run.dragOriginX = run.x; run.dragOriginZ = run.z;
+    gameShell.setPointerCapture(event.pointerId);
     sceneHost.classList.add('steering');
   }
 }, { capture: true });
@@ -957,7 +953,9 @@ window.addEventListener('pointerup', event => {
   if (phase === 'run' && run?.pointer === event.pointerId) {
     const tapped = !run.pointerMoved && performance.now() - run.pointerDownAt < 320;
     run.tapTarget = tapped ? steeringPoint(event.clientX, event.clientY) : null;
-    run.holding = false; run.pointer = null; sceneHost.classList.remove('steering'); return;
+    run.holding = false; run.pointer = null; sceneHost.classList.remove('steering');
+    if (gameShell.hasPointerCapture(event.pointerId)) gameShell.releasePointerCapture(event.pointerId);
+    return;
   }
   if (phase === 'pack' && dragPiece) {
     const cell = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('.hold-cell');
@@ -969,6 +967,7 @@ window.addEventListener('pointerup', event => {
 window.addEventListener('pointercancel', event => {
   if (phase === 'run' && run?.pointer === event.pointerId) {
     run.holding = false; run.pointer = null; sceneHost.classList.remove('steering');
+    if (gameShell.hasPointerCapture(event.pointerId)) gameShell.releasePointerCapture(event.pointerId);
   }
 });
 
