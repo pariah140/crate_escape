@@ -99,7 +99,14 @@ export const repairCost = (save: SaveData, index = save.boat): number => Math.ce
 export const rareChance = (save: SaveData): number => 0.04 + save.yardUpgrades.brokerDesk * (1 / 30);
 
 export const PORTS = HARBORS.map(harbor => harbor.name);
-export function harborRequirements(save: SaveData, index: number): string[] {
+export function harborOutfittingFee(index: number, discounted = false): number {
+  const fee = HARBOR_GATES[index]?.fee ?? 0;
+  return discounted ? Math.ceil(fee / 2) : fee;
+}
+export function harborDiscountTokenCost(index: number): number {
+  return Math.max(5, Math.ceil((HARBOR_GATES[index]?.fee ?? 0) / 200));
+}
+export function harborRequirements(save: SaveData, index: number, discounted = false): string[] {
   const harbor = HARBORS[index];
   if (!harbor) return ['Unknown harbor'];
   if (save.unlockedPorts.includes(index)) return [];
@@ -113,13 +120,14 @@ export function harborRequirements(save: SaveData, index: number): string[] {
     if (!record?.clean) unmet.push('Clean delivery needed');
   }
   if (Math.max(...save.ownedBoats.map(id => usableCells(BOATS[id]))) < gate.capacity) unmet.push(`${gate.capacity}-cell boat needed`);
-  if (save.cash < gate.fee) unmet.push(`Outfitting ${moneyGate(save.cash)}/${moneyGate(gate.fee)}`);
+  const fee = harborOutfittingFee(index, discounted);
+  if (save.cash < fee) unmet.push(`Outfitting ${moneyGate(save.cash)}/${moneyGate(fee)}`);
   return unmet;
 }
 const moneyGate = (value: number): string => `$${Math.floor(value).toLocaleString()}`;
-export function openHarbor(save: SaveData, index: number): boolean {
-  if (index <= 0 || harborRequirements(save, index).length) return false;
-  save.cash -= HARBOR_GATES[index].fee;
+export function openHarbor(save: SaveData, index: number, discounted = false): boolean {
+  if (index <= 0 || harborRequirements(save, index, discounted).length) return false;
+  save.cash -= harborOutfittingFee(index, discounted);
   save.unlockedPorts.push(index);
   save.unlockedPorts.sort((a, b) => a - b);
   return true;

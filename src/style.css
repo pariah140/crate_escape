@@ -65,6 +65,22 @@ button:active:not(:disabled) { transform: translateY(2px); }
 .cloud-conflict > div span { color: #7b6a50; }
 .cloud-purchases { background: #fffaf0; border-color: #e8d8ba; }
 .cloud-purchases .secondary-button { margin-top: 12px; }
+.cloud-purchases > strong { display: block; font-size: 22px; letter-spacing: -.04em; margin-top: 5px; }
+.cloud-purchases .eyebrow { color: #9c654c; }
+.cloud-purchases .token-error { color: #9d3d39; font-weight: 900; }
+.token-packs { display: grid; gap: 8px; margin-top: 15px; }
+.token-pack { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 11px; border: 2px solid #e8d8ba; border-radius: 12px; background: #fff3d6; }
+.token-pack span { display: grid; gap: 2px; }
+.token-pack b { font-size: 15px; }
+.token-pack small { color: #6e7870; font: 800 11px ui-monospace, monospace; }
+.token-pack .primary-button { min-height: 39px; padding: 6px 12px; font-size: 12px; white-space: nowrap; }
+.cloud-purchases .text-button { margin-top: 11px; }
+.token-discount { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; padding: 10px; border: 2px solid #d9c5a0; border-radius: 12px; background: #fff2ce; }
+.token-discount > span { flex: 1 1 190px; font-size: 12px; font-weight: 900; }
+.token-discount p { flex: 1 1 100%; margin: 0; font-size: 11px; line-height: 1.35; }
+.token-discount .primary-button, .token-discount .secondary-button { min-height: 39px; padding: 7px 10px; font-size: 11px; }
+.token-discount .text-button { padding: 6px; }
+.token-discount-note { display: inline-block; margin: 8px 0; color: #26735d; font-size: 12px; font-weight: 900; }
 .cloud-panel .panel-foot { margin-top: auto; }
 .panel-head { margin-bottom: 20px; }
 .step-label, .eyebrow, .section-heading, .tray-heading { font: 900 10px ui-monospace, 'SFMono-Regular', monospace; letter-spacing: .13em; }

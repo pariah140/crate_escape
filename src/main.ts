@@ -1,7 +1,7 @@
 import './style.css';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Share } from '@capacitor/share';
-import { cloudSupported, cloudDeviceId, readCloud, writeCloudSave, watchCloud, currentEntitlements, restorePurchases, type CloudRecord } from './cloud';
+import { cloudSupported, cloudDeviceId, readCloud, writeCloudSave, watchCloud, currentEntitlements, restorePurchases, readTokenProducts, readTokenWallet, purchaseTokenPack, buyHarborDiscount, watchTokenWallet, type CloudRecord, type TokenProduct, type TokenWallet } from './cloud';
 import { incomingCloudRecord } from './cloud-policy';
 import { World } from './world';
 import { advanceMotion } from './piloting';
@@ -11,7 +11,7 @@ import { heardBySoundPatrol, inVisionCone, sightProfile } from './patrols';
 import {
   BOATS, PORTS, HARBORS, SHAPE_NAMES, canFitAll, canPlace, jobById, jobsForPort,
   loadSave, occupiedCells, persist, rotatedCells, usableCells, isBlocked, boatUpgrade, repairCost, rareChance, specialOfferFor,
-  harborRequirements, refreshHarborUnlocks, openHarbor, recordHarborDelivery, HARBOR_GATES, estimateCargoPay, voyageReceipt, boatTraits, impactDamage, conditionHandling, charterChallenge, completesChallenge,
+  harborRequirements, harborOutfittingFee, harborDiscountTokenCost, refreshHarborUnlocks, openHarbor, recordHarborDelivery, HARBOR_GATES, estimateCargoPay, voyageReceipt, boatTraits, impactDamage, conditionHandling, charterChallenge, completesChallenge,
   BACKUP_BOAT_INDEX, MIN_SEAWORTHY_CONDITION,
   type Job, type Phase, type Piece, type SaveData,
 } from './model';
@@ -44,6 +44,11 @@ let cloudState = cloudSupported ? 'Checking iCloud…' : 'Saved on this device';
 let pendingCloud: CloudRecord | null = null;
 let cloudRecords: CloudRecord[] = [];
 let purchasedProducts: string[] = [];
+let tokenWallet: TokenWallet | null = null;
+let tokenProducts: TokenProduct[] = [];
+let tokenError = '';
+let tokenBusy = false;
+let confirmDiscountHarbor: number | null = null;
 let syncTimer = 0;
 world.setBoat(BOATS[save.boat]);
 let currentPlan: LevelPlan = levelPlan(save.level, save.port);
@@ -158,6 +163,44 @@ function scheduleCloudSave(): void {
   }).catch(error => { cloudState = `iCloud sync paused: ${error instanceof Error ? error.message : String(error)}`; if (phase === 'cloud') render(); }); }, 900);
 }
 
+function showTokenWallet(wallet: TokenWallet): void {
+  tokenWallet = wallet; tokenError = '';
+  if (phase === 'cloud' || phase === 'map') render();
+}
+async function refreshTokenWallet(): Promise<void> {
+  try { showTokenWallet(await readTokenWallet()); }
+  catch (error) {
+    tokenWallet = null;
+    tokenError = error instanceof Error ? error.message : String(error);
+    if (phase === 'cloud' || phase === 'map') render();
+  }
+}
+async function purchaseTokens(productId: string): Promise<void> {
+  if (tokenBusy || !tokenWallet) return;
+  tokenBusy = true; render();
+  try {
+    const result = await purchaseTokenPack(productId);
+    if (result.wallet) showTokenWallet(result.wallet);
+    if (result.status === 'purchased') notify('Chart Tokens added to your iCloud wallet.', 'success');
+    else if (result.status === 'pending') notify('Purchase pending. Tokens will appear after Apple approves it.');
+  } catch (error) {
+    tokenError = error instanceof Error ? error.message : String(error);
+    notify(tokenError, 'danger');
+  } finally { tokenBusy = false; if (phase === 'cloud') render(); }
+}
+
+async function purchaseHarborDiscount(index: number): Promise<void> {
+  if (tokenBusy || !tokenWallet || !Number.isInteger(index) || index < 2 || index >= HARBORS.length) return;
+  tokenBusy = true; render();
+  try {
+    showTokenWallet(await buyHarborDiscount(index));
+    confirmDiscountHarbor = null;
+    notify(`${HARBORS[index].name} outfitting is now half price.`, 'success');
+  } catch (error) {
+    notify(error instanceof Error ? error.message : String(error), 'danger');
+  } finally { tokenBusy = false; if (phase === 'map') render(); }
+}
+
 function renderCloud(): void {
   view.innerHTML = `<main class="side-panel cloud-panel" aria-label="Save and purchases">
     ${headerStep('YOUR CAPTAIN’S LOG', 'Save progress', 'Your voyages stay on this device and can travel with iCloud on iPhone.')}
@@ -165,7 +208,10 @@ function renderCloud(): void {
     <div class="cloud-save"><span class="eyebrow">CURRENT PROGRESS</span><strong>${saveSummary(save)}</strong></div>
     ${pendingCloud ? `<div class="cloud-conflict"><strong>Two voyages found</strong><p>Choose the progress to continue with. Nothing changes until you choose.</p><div><span>This device</span><b>${saveSummary(save)}</b></div><div><span>iCloud</span><b>${saveSummary(pendingCloud.save)}</b></div><button class="primary-button full" type="button" data-action="use-cloud">Use iCloud progress</button><button class="secondary-button full" type="button" data-action="use-device">Keep this device</button></div>` : ''}
     ${cloudAvailable && !pendingCloud ? '<button class="secondary-button full" type="button" data-action="sync-now">↻ Check iCloud now</button>' : ''}
-    ${cloudSupported ? `<div class="cloud-purchases"><strong>App Store purchases</strong><p>${purchasedProducts.length ? `${purchasedProducts.length} permanent unlock${purchasedProducts.length === 1 ? '' : 's'} available on this Apple account.` : 'Permanent unlocks will be restorable here when in-app purchases are released.'}</p><button class="secondary-button full" type="button" data-action="restore-purchases">Restore purchases</button></div>` : ''}
+    ${cloudSupported ? `<div class="cloud-purchases"><span class="eyebrow">CHART TOKEN WALLET</span><strong>${tokenWallet ? `${tokenWallet.balance} Chart Tokens` : 'Checking iCloud wallet…'}</strong><p>Tokens can halve a harbour's outfitting fee. Delivery and boat requirements still apply. Your token wallet is separate from the voyage save.</p>${tokenError ? `<p class="token-error" role="alert">${escapeHtml(tokenError)}</p>` : ''}
+      <div class="token-packs">${tokenProducts.length ? tokenProducts.map(product => `<div class="token-pack"><span><b>${product.amount} tokens</b><small>${escapeHtml(product.price)}</small></span><button class="primary-button" type="button" data-action="buy-tokens" data-id="${escapeHtml(product.id)}" ${tokenBusy || !tokenWallet ? 'disabled' : ''}>Buy · ${escapeHtml(product.price)}</button></div>`).join('') : '<p>Token packs will appear when they are available in the App Store.</p>'}</div>
+      <button class="secondary-button full" type="button" data-action="refresh-wallet" ${tokenBusy ? 'disabled' : ''}>↻ Check token wallet</button>
+      <button class="text-button" type="button" data-action="restore-purchases">Restore permanent purchases</button>${purchasedProducts.length ? `<p>${purchasedProducts.length} permanent unlock${purchasedProducts.length === 1 ? '' : 's'} restored.</p>` : ''}</div>` : ''}
     <div class="panel-foot"><button class="secondary-button full" type="button" data-action="board">← Back to the job board</button></div>
   </main>`;
 }
@@ -404,10 +450,12 @@ function renderMap(): void {
   const stops = HARBORS.map((harbor, index) => {
     const unlocked = save.unlockedPorts.includes(index);
     const current = save.port === index;
-    const missing = unlocked ? [] : harborRequirements(save, index);
+    const discounted = tokenWallet?.discountedHarbors.includes(index) ?? false;
+    const missing = unlocked ? [] : harborRequirements(save, index, discounted);
     const gate = HARBOR_GATES[index];
     const record = save.harborRecords[index - 1];
-    const requirements = index === 0 ? 'Your first home port' : `${gate.runs} ${HARBORS[index - 1].name} deliveries · 2 cargo types · 1 clean run · ${gate.capacity}+ cell boat · ${money(gate.fee)} outfitting`;
+    const fee = harborOutfittingFee(index, discounted);
+    const requirements = index === 0 ? 'Your first home port' : `${gate.runs} ${HARBORS[index - 1].name} deliveries · 2 cargo types · 1 clean run · ${gate.capacity}+ cell boat · ${money(fee)} outfitting`;
     return `<article class="map-stop ${unlocked ? 'unlocked' : 'locked'} ${current ? 'current' : ''}" style="--harbor-color:${harbor.color}">
       <div class="map-island" aria-hidden="true"><span>${harbor.icon}</span></div>
       <div class="map-stop-body"><span class="eyebrow">HARBOR ${String(index + 1).padStart(2, '0')} · ${current ? 'CURRENT PORT' : unlocked ? 'UNLOCKED' : 'LOCKED'}</span><h2>${harbor.name}</h2><p>${harbor.subtitle}</p>
@@ -415,7 +463,9 @@ function renderMap(): void {
       <small>${index === 0 ? 'Open from the start' : `Unlock: ${requirements}`}</small>
       ${!unlocked && index > 0 ? `<div class="charter-progress"><strong>${Math.min(record?.deliveries ?? 0, gate.runs)}/${gate.runs} deliveries</strong><span>${Math.min(record?.cargoKinds.length ?? 0, 2)}/2 cargo types · ${record?.clean ? '✓ clean run' : 'clean run needed'}</span></div>` : ''}
       ${missing.length ? `<div class="map-missing">Still needed: ${missing.join(' · ')}</div>` : ''}
-      ${current ? '<span class="fleet-active-label">⚓ Sailing from here</span>' : unlocked ? `<button class="secondary-button" type="button" data-action="select-port" data-id="${index}">Sail from here →</button>` : missing.length === 0 ? `<button class="primary-button" type="button" data-action="open-port" data-id="${index}">Outfit & open · ${money(gate.fee)} →</button>` : '<span class="map-lock">🔒 Complete the charter to open</span>'}</div>
+      ${discounted && !unlocked ? '<span class="token-discount-note">✦ Half-price chart ready</span>' : ''}
+      ${cloudSupported && tokenWallet && index >= 2 && !unlocked && !discounted ? `<div class="token-discount"><span>Halve outfitting: ${money(gate.fee)} → ${money(harborOutfittingFee(index, true))}</span>${confirmDiscountHarbor === index ? `<p>Spend ${harborDiscountTokenCost(index)} Chart Tokens on this harbour? This chart stays in your iCloud wallet.</p><button class="primary-button" type="button" data-action="confirm-discount" data-id="${index}" ${tokenBusy || tokenWallet.balance < harborDiscountTokenCost(index) ? 'disabled' : ''}>Spend ${harborDiscountTokenCost(index)} tokens</button><button class="text-button" type="button" data-action="cancel-discount">Cancel</button>` : `<button class="secondary-button" type="button" data-action="offer-discount" data-id="${index}" ${tokenBusy || tokenWallet.balance < harborDiscountTokenCost(index) ? 'disabled' : ''}>Chart for ${harborDiscountTokenCost(index)} tokens</button>`}</div>` : ''}
+      ${current ? '<span class="fleet-active-label">⚓ Sailing from here</span>' : unlocked ? `<button class="secondary-button" type="button" data-action="select-port" data-id="${index}">Sail from here →</button>` : missing.length === 0 ? `<button class="primary-button" type="button" data-action="open-port" data-id="${index}">Outfit & open · ${money(fee)} →</button>` : '<span class="map-lock">🔒 Complete the charter to open</span>'}</div>
     </article>`;
   });
   const regionNames = ['The sheltered coast', 'The winding coast', 'The southern reaches', 'The outer islands', 'The far horizon'];
@@ -699,6 +749,11 @@ function handleAction(action: string, id?: string, target?: HTMLElement): void {
       purchasedProducts = products; render(); notify(products.length ? 'Purchases restored.' : 'No restorable purchases found.', products.length ? 'success' : 'info');
     }).catch(error => { notify(error instanceof Error ? error.message : String(error), 'danger'); });
   }
+  else if (action === 'refresh-wallet') { void refreshTokenWallet(); }
+  else if (action === 'buy-tokens' && id) { void purchaseTokens(id); }
+  else if (action === 'offer-discount' && id) { confirmDiscountHarbor = Number(id); render(); }
+  else if (action === 'cancel-discount') { confirmDiscountHarbor = null; render(); }
+  else if (action === 'confirm-discount' && id && confirmDiscountHarbor === Number(id)) { void purchaseHarborDiscount(Number(id)); }
   else if (action === 'add-job' && id) addJob(id);
   else if (action === 'remove-job' && id) removeJob(id);
   else if (action === 'pack' && jobs.length) { phase = 'pack'; selected = pieces.find(piece => piece.x === null)?.id || null; render(); }
@@ -707,7 +762,7 @@ function handleAction(action: string, id?: string, target?: HTMLElement): void {
   else if (action === 'inspect-boat' && id) { const index = Number(id); if (!save.ownedBoats.includes(index)) return; yardSelected = index; world.focusShipyardBoat(index); renderYard(); }
   else if (action === 'yard-overview') { yardSelected = null; world.focusShipyardBoat(null); renderYard(); }
   else if (action === 'market') { phase = 'market'; render(); }
-  else if (action === 'map') { phase = 'map'; render(); }
+  else if (action === 'map') { phase = 'map'; render(); if (cloudSupported) void refreshTokenWallet(); }
   else if (action === 'select-piece' && id) { selected = id; tick(); render(); }
   else if (action === 'rotate') { const piece = pieces.find(item => item.id === selected); if (piece && piece.x === null) { piece.rotation = (piece.rotation + 1) % 4; tick(); render(); } }
   else if (action === 'cell' && target) placeAt(Number(target.dataset.x), Number(target.dataset.y));
@@ -762,11 +817,23 @@ function handleAction(action: string, id?: string, target?: HTMLElement): void {
   }
   else if (action === 'open-port' && id) {
     const index = Number(id);
-    if (!openHarbor(save, index)) return;
-    save.port = index; jobs = []; pieces = []; selected = null; phase = 'board';
-    saveProgress(); tick(); render(); notify(`${PORTS[index]} charted and ready to sail!`, 'success');
+    if (cloudSupported && index >= 2) {
+      void readTokenWallet().then(wallet => { showTokenWallet(wallet); finishOpeningPort(index); })
+        .catch(() => {
+          const discountedWasShown = tokenWallet?.discountedHarbors.includes(index) ?? false;
+          tokenWallet = null;
+          if (discountedWasShown) notify('Reconnect to iCloud to use your half-price harbour chart.', 'danger');
+          else finishOpeningPort(index);
+        });
+    } else finishOpeningPort(index);
   }
 
+}
+
+function finishOpeningPort(index: number): void {
+  if (!openHarbor(save, index, tokenWallet?.discountedHarbors.includes(index) ?? false)) return;
+  save.port = index; jobs = []; pieces = []; selected = null; phase = 'board';
+  saveProgress(); tick(); render(); notify(`${PORTS[index]} charted and ready to sail!`, 'success');
 }
 
 view.addEventListener('click', event => {
@@ -862,6 +929,10 @@ function frame(now: number): void {
 
 render(); requestAnimationFrame(frame);
 if (cloudSupported) {
+  void watchTokenWallet(showTokenWallet);
+  void refreshTokenWallet();
+  void readTokenProducts().then(products => { tokenProducts = products; if (phase === 'cloud') render(); })
+    .catch(error => { tokenError = error instanceof Error ? error.message : String(error); if (phase === 'cloud') render(); });
   void watchCloud(event => {
     if (event.quotaExceeded) { cloudState = 'iCloud storage is full. Device progress is safe.'; if (phase === 'cloud') render(); return; }
     void readCloud().then(result => { cloudAvailable = result.available; evaluateCloud(result.records); if (phase === 'cloud') render(); });

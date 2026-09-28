@@ -1,6 +1,6 @@
 # Crate Escape economy and monetisation proposal
 
-**Status:** The core game-cash balance is implemented: boat prices and specialties, local harbour charters, outfitting fees, bounded cargo pay, service and repairs, reduced rare-offer frequency, and rotating voyage challenges. The payout and timing figures remain hypotheses for play testing. Paid products, token currency, ads, daily challenges, cosmetics and purchase infrastructure remain proposals below; they are not in the game.
+**Status:** The core game-cash balance is implemented: boat prices and specialties, local harbour charters, outfitting fees, bounded cargo pay, service and repairs, reduced rare-offer frequency, and rotating voyage challenges. The iOS build now includes a StoreKit 2 Chart Token flow and CloudKit wallet for optional half-price harbour outfitting; products still require App Store Connect configuration and sandbox testing before sale. The payout and timing figures remain hypotheses for play testing. Ads, daily challenges, cosmetics and other proposed purchases remain plans below.
 
 ## What the current build does
 

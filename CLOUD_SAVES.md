@@ -11,9 +11,29 @@ Each installation has its own iCloud key. This keeps one device from silently re
 3. Test an existing device save migrating to iCloud, an empty second device restoring it, divergent saves requiring a choice, offline play, and delayed sync after reconnecting.
 4. The GitHub Pages version intentionally has no iCloud bridge. Its progress stays in that browser; cross-platform progress sharing would require a separate backend.
 
-## Purchases
+## Chart Token purchases
 
-The native bridge reads StoreKit's verified current entitlements and exposes a user-triggered **Restore purchases** action. No in-app products have been created or sold yet, so there is nothing to unlock until product IDs and purchase screens are designed in App Store Connect. Permanent unlocks can be restored by StoreKit on a new device. Spent currency or other consumables belong in the iCloud game save; StoreKit does not include consumed purchases in current entitlements.
+The iOS app now has a StoreKit 2 purchase flow for three consumable packs. It reads prices from App Store Connect; it does not display a guessed price or show a purchase button when Apple has no product to sell. Create these **Consumable** products in App Store Connect before testing purchases:
+
+| Product ID | Chart Tokens |
+| --- | ---: |
+| `com.pariah140.crateescape.charttokens30` | 30 |
+| `com.pariah140.crateescape.charttokens90` | 90 |
+| `com.pariah140.crateescape.charttokens220` | 220 |
+
+Choose and approve the real-money prices in App Store Connect. Chart Tokens can buy a permanent 50% outfitting discount for one locked harbour, starting with harbour 3. The token price is at least 5 and otherwise one token per $200 of the harbour's original outfitting fee, rounded up. This does not waive the delivery, cargo variety, clean-run or boat-hold requirements. The discount is displayed and confirmed before tokens are spent.
+
+The token wallet is one record in the player's **private CloudKit database**, independent of the selectable game save. It records each verified StoreKit transaction ID once, each refunded grant once, and each harbour discount once. Its balance is derived from these records. CloudKit change tags reject a stale write so simultaneous devices reload and retry instead of silently overwriting a spend. The app finishes a consumable StoreKit transaction only after CloudKit confirms the grant. It listens to new and unfinished transactions on launch; an iCloud failure leaves the purchase unfinished for later recovery. Purchasing or spending tokens requires a working iCloud account and network connection. Harbours can still be opened at their full game-cash fee without iCloud. The browser build keeps its free game progress but offers no App Store purchases.
+
+The existing **Restore permanent purchases** button checks StoreKit current entitlements. It does not claim to restore spent consumables. The token wallet follows the player's iCloud account; switching iCloud accounts or deleting that account's app data can make the wallet inaccessible. This client-managed solution is less resistant to a modified app than a server-owned balance. If paid token volume or fraud grows, move the wallet and grant validation to a backend.
+
+### Apple Developer and release setup
+
+1. Enable **iCloud Key-value storage and CloudKit** for `com.pariah140.crateescape`. Register `iCloud.com.pariah140.crateescape` and confirm the Xcode entitlements match the App ID. Configure In-App Purchase for the App ID as well.
+2. Create the three consumable products above in App Store Connect, with localisation, prices and review assets. Sign the build with the correct team.
+3. In the CloudKit development environment, create a wallet by using a sandbox purchase, then deploy the `CrateTokenWallet` record type and `payload` field schema to production before release.
+4. Test on two physical iOS devices with the same iCloud account: successful purchase, cancellation, Ask to Buy, app termination between payment and grant, delayed iCloud access, simultaneous discount attempts, refund, reinstall and recovery. Confirm that choosing either voyage save leaves the token wallet unchanged.
+5. Submit the IAP products and app together for App Review. Paid tokens are not ready for sale until the signed build and sandbox scenarios pass.
 
 ## Technical notes
 

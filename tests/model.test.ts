@@ -123,6 +123,23 @@ test('harbor charters need local deliveries, variety, a clean run, capacity and 
   assert.ok(save.unlockedPorts.includes(2), 'opened harbours stay open');
 });
 
+test('a Chart Token harbour discount halves only that harbour fee and survives save replacement', async () => {
+  const { defaultSave, harborRequirements, harborOutfittingFee, harborDiscountTokenCost, openHarbor } = await import('../src/model');
+  const save = defaultSave();
+  save.unlockedPorts = [0, 1];
+  save.ownedBoats.push(2);
+  save.harborRecords[1] = { deliveries: 5, cargoKinds: ['standard', 'fragile'], clean: true };
+  save.cash = 125;
+  assert.equal(harborOutfittingFee(2), 250);
+  assert.equal(harborOutfittingFee(2, true), 125);
+  assert.equal(harborDiscountTokenCost(2), 5);
+  assert.match(harborRequirements(save, 2).join(' '), /Outfitting/);
+  assert.deepEqual(harborRequirements(save, 2, true), []);
+  assert.equal(openHarbor(save, 2, true), true);
+  assert.equal(save.cash, 0);
+  assert.deepEqual(save.unlockedPorts, [0, 1, 2]);
+});
+
 test('every harbor has distinct jobs and all can fit a large hull', async () => {
   const { BOATS, jobsForPort, HARBORS } = await import('../src/model');
   const ids = new Set<string>();
